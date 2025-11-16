@@ -255,14 +255,14 @@ def build_taxonomy_lookups(topics_path: Optional[str | Path] = None) -> Dict:
 def get_domain_color(name_or_id: str) -> str:
     """
     Map a domain name or ID to its hex color.
-    Unknown domains -> 'Other'.
+    Unknown domains -> 'No topic'.
     """
     look = build_taxonomy_lookups()
     name = str(name_or_id)
     if name.isdigit():
         # convert id -> name
         name = look["id2name"].get(name, name)
-    return _DOMAIN_COLORS.get(name, _DOMAIN_COLORS["Other"])
+    return _DOMAIN_COLORS.get(name, _DOMAIN_COLORS["No topic"])
 
 
 @lru_cache(maxsize=None)
@@ -286,7 +286,7 @@ def get_field_color(field_name_or_id: str) -> str:
     for d, fields in look["fields_by_domain"].items():
         if field_name in fields:
             return get_domain_color(d)
-    return _DOMAIN_COLORS["Other"]
+    return _DOMAIN_COLORS["No topic"]
 
 
 @lru_cache(maxsize=None)
@@ -308,7 +308,7 @@ def get_subfield_color(subfield_name_or_id: str) -> str:
             if tok in subs:
                 dom = get_domain_for_field(field_name)
                 return get_domain_color(dom)
-    return _DOMAIN_COLORS["Other"]
+    return _DOMAIN_COLORS["No topic"]
 
 
 @lru_cache(maxsize=None)
@@ -340,7 +340,7 @@ def get_topic_color(topic_name_or_id: str) -> str:
     if not m.empty and "domain_name" in m.columns and pd.notna(m["domain_name"].iloc[0]):
         return get_domain_color(str(m["domain_name"].iloc[0]))
 
-    return _DOMAIN_COLORS["Other"]
+    return _DOMAIN_COLORS["No topic"]
 
 
 # --------------------------- domain helpers --------------------------
@@ -363,7 +363,7 @@ def get_domain_for_field(field_name_or_id: str) -> str:
     for dom, fields in look["fields_by_domain"].items():
         if tok in fields:
             return dom
-    return "Other"
+    return "No topic"
 
 
 @lru_cache(maxsize=None)
@@ -381,7 +381,7 @@ def get_domain_for_subfield(subfield_name_or_id: str) -> str:
     for field_name, subs in look["subfields_by_field"].items():
         if tok in subs:
             return get_domain_for_field(field_name)
-    return "Other"
+    return "No topic"
 
 
 # --------------------------- conveniences --------------------------
