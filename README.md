@@ -1,30 +1,22 @@
-# LUE Portfolio Explorer
+# Université de Lorraine - Laboratory Analysis Dashboard
 
-A Streamlit app to explore research outputs with multiple dashboards. v0.1 focuses on the **Lab View** with side‑by‑side comparisons.
+A Streamlit application for bibliometric analysis and visualization of research laboratory data at Université de Lorraine.
 
-## Quick start
+## Features
+- Laboratory performance metrics and KPIs
+- Research field and domain distribution analysis
+- Partnership and collaboration networks
+- Interactive visualizations using Plotly
 
-
+## Installation
 ```bash
-# 1) clone
-git clone <your-fork-or-repo-url>
-cd app
-
-
-# 2) (optional) create venv
-python -m venv .venv && source .venv/bin/activate
-
-
-# 3) install deps
 pip install -r requirements.txt
+```
 
+## Usage
+```bash
+streamlit run app.py
+```
 
-# 4) add data
-mkdir -p data
-# copy parquet files here:
-# pubs_final.parquet
-# dict_internal.parquet
-
-
-# 5) run
-streamlit run streamlit_app.py
+## License
+GNU Affero General Public License v3.0 (AGPL-3.0) - See LICENSE file for details.
