@@ -30,7 +30,16 @@ YEAR_START, YEAR_END = 2019, 2023
 
 # ------------------------------- Data Loading -------------------------------
 
-from lib.data_cache import get_labs_df
+@st.cache_data(show_spinner=False)
+def load_labs_data() -> pd.DataFrame:
+    """Load and filter laboratory data"""
+    df = pd.read_parquet(UNITS_PATH)
+    return df[df["Structure type"] == "lab"].copy()
+
+@st.cache_data(show_spinner=False)
+def get_taxonomy() -> Dict:
+    """Get taxonomy lookups"""
+    return build_taxonomy_lookups()
 
 # --------------------------- Parsing Helpers ---------------------------
 
@@ -186,30 +195,25 @@ def create_yearly_domain_chart(df: pd.DataFrame) -> go.Figure:
         barmode="stack",
         labels={
             "year": "Year",
-            "count": "Publications",
-            "domain": "Domain",
+            "count": "Number of publications",
+            "domain": "",
         },
-        hover_data={"count": ":,"}
     )
     
     fig.update_layout(
-        margin=dict(l=0, r=10, t=40, b=10),
-        height=400,
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0
-        ),
+        margin=dict(l=0, r=10, t=10, b=10),
+        showlegend=False,
+        height=380,
         hovermode="x unified"
     )
+    
+    fig.update_xaxes(tickfont=dict(size=12))
+    fig.update_yaxes(tickfont=dict(size=12))
     
     return fig
 
 def create_field_distribution_chart(df: pd.DataFrame, taxonomy: Dict) -> go.Figure:
-    """Create horizontal bar chart for field distribution"""
+    """Create horizontal bar chart for field distribution with count annotations"""
     if df.empty:
         fig = go.Figure()
         fig.add_annotation(text="No field data available", x=0.5, y=0.5, showarrow=False)
@@ -230,27 +234,62 @@ def create_field_distribution_chart(df: pd.DataFrame, taxonomy: Dict) -> go.Figu
     df_ordered["color"] = df_ordered["field_name"].apply(get_field_color)
     df_ordered["domain"] = df_ordered["field_name"].apply(get_domain_for_field)
     
-    fig = go.Figure(go.Bar(
-        y=df_ordered["field_name"],
-        x=df_ordered["count"],
-        orientation="h",
-        marker=dict(color=df_ordered["color"]),
-        text=df_ordered["count"].astype(int),
-        textposition="outside",
-        hovertemplate="<b>%{y}</b><br>Publications: %{x}<br>Domain: %{customdata}<extra></extra>",
-        customdata=df_ordered["domain"]
-    ))
+    # Calculate percentage share
+    total = df_ordered["count"].sum()
+    df_ordered["share_pct"] = (df_ordered["count"] / total * 100) if total > 0 else 0
     
-    fig.update_layout(
-        xaxis_title="Number of Publications",
-        yaxis_title="",
-        height=max(400, len(df_ordered) * 25),
-        margin=dict(l=200, r=50, t=20, b=50),
-        showlegend=False,
-        hovermode="closest"
+    fig = px.bar(
+        df_ordered,
+        x="share_pct",
+        y="field_name",
+        orientation="h",
+        color="domain",
+        color_discrete_map={d: get_domain_color(d) for d in df_ordered["domain"].unique()},
+        labels={"share_pct": "Share (%)", "field_name": ""},
+        custom_data=["count", "domain"],
     )
     
-    fig.update_yaxis(autorange="reversed")
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Share: %{x:.1f}%<br>"
+            "Publications: %{customdata[0]:,.0f}<br>"
+            "Domain: %{customdata[1]}"
+            "<extra></extra>"
+        ),
+    )
+    
+    max_share = float(df_ordered["share_pct"].max() or 0.0)
+    if max_share <= 0:
+        max_share = 1.0
+    gutter = max_share * 0.20
+    
+    fig.update_xaxes(
+        range=[-gutter, max_share * 1.05],
+        showgrid=True,
+        gridcolor="#e0e0e0",
+        ticksuffix="%",
+        tickfont=dict(size=12),
+    )
+    fig.update_yaxes(tickfont=dict(size=13))
+    
+    # Add count annotations in gutter
+    for field_name, cnt in zip(df_ordered["field_name"], df_ordered["count"]):
+        fig.add_annotation(
+            x=-gutter * 0.98,
+            y=field_name,
+            text=f"{int(cnt)}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(size=12, color="#444"),
+        )
+    
+    fig.update_layout(
+        margin=dict(l=0, r=10, t=25, b=10),
+        showlegend=False,
+        height=600,
+    )
     
     return fig
 
@@ -261,25 +300,21 @@ def create_subfield_treemap(df: pd.DataFrame) -> go.Figure:
         fig.add_annotation(text="No subfield data available", x=0.5, y=0.5, showarrow=False)
         return fig
     
-    # Create hierarchical structure
-    labels = ["All"] + df["domain"].unique().tolist() + df["name"].tolist()
-    parents = [""] + ["All"] * len(df["domain"].unique()) + df["domain"].tolist()
-    values = [df["count"].sum()] + [
-        df[df["domain"] == d]["count"].sum() for d in df["domain"].unique()
-    ] + df["count"].tolist()
+    # Aggregate by domain first for better hierarchy
+    domain_totals = df.groupby("domain")["count"].sum().to_dict()
     
-    # Colors
-    colors = ["#ffffff"] + [
-        get_domain_color(d) for d in df["domain"].unique()
-    ] + df["color"].tolist()
-    
+    # Create hierarchical data with proper structure
     fig = go.Figure(go.Treemap(
-        labels=labels,
-        parents=parents,
-        values=values,
-        marker=dict(colors=colors),
+        labels=df["name"].tolist() + list(domain_totals.keys()) + ["All"],
+        parents=df["domain"].tolist() + ["All"] * len(domain_totals) + [""],
+        values=df["count"].tolist() + list(domain_totals.values()) + [df["count"].sum()],
+        marker=dict(
+            colors=df["color"].tolist() + [get_domain_color(d) for d in domain_totals.keys()] + ["#ffffff"],
+            line=dict(width=2)
+        ),
         textinfo="label+value",
-        hovertemplate="<b>%{label}</b><br>Publications: %{value}<br>Parent: %{parent}<extra></extra>"
+        hovertemplate="<b>%{label}</b><br>Publications: %{value}<br>Parent: %{parent}<extra></extra>",
+        textfont=dict(size=12)
     ))
     
     fig.update_layout(
@@ -295,8 +330,8 @@ st.set_page_config(page_title="Lab View · Analysis", layout="wide")
 st.title("🏭 Laboratory Analysis Dashboard")
 
 # Load data
-taxonomy = build_taxonomy_lookups()
-df_labs = get_labs_df()
+taxonomy = get_taxonomy()
+df_labs = load_labs_data()
 
 if df_labs.empty:
     st.error("No laboratory data found.")
@@ -324,6 +359,10 @@ st.divider()
 # ----------------------------- Overview Section -----------------------------
 
 st.header(f"📊 {selected_lab} - Overview")
+
+# Department/Pole info if available
+if "Pole" in lab_data.index and pd.notna(lab_data["Pole"]):
+    st.markdown(f"**Pôle:** {lab_data['Pole']}")
 
 # Key metrics
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -367,8 +406,24 @@ st.divider()
 
 st.header("📈 Research Output Analysis")
 
+# Create HTML legend for domains (reusable)
+def create_domain_legend() -> str:
+    """Create HTML legend for domain colors"""
+    domains = ["Health Sciences", "Life Sciences", "Physical Sciences", "Social Sciences"]
+    legend_html = "<div style='margin: 0.8rem 0 0.4rem 0;'>"
+    for d in domains:
+        color = get_domain_color(d)
+        legend_html += (
+            f"<span style='display:inline-block;width:12px;height:12px;"
+            f"border-radius:50%;background-color:{color};margin-right:4px;'></span>"
+            f"<span style='margin-right:14px;'>{d}</span>"
+        )
+    legend_html += "</div>"
+    return legend_html
+
 # Yearly distribution by domain
 st.subheader("Publications by Year and Domain")
+st.markdown(create_domain_legend(), unsafe_allow_html=True)
 df_year_dom = parse_year_domain_blob(lab_data.get("Copubs per year per domain", ""))
 if not df_year_dom.empty:
     fig_year = create_yearly_domain_chart(df_year_dom)
@@ -378,6 +433,7 @@ else:
 
 # Field distribution
 st.subheader("Publications by Research Field")
+st.markdown(create_domain_legend(), unsafe_allow_html=True)
 df_fields = parse_field_blob(lab_data.get("Copubs per field", ""), taxonomy)
 if not df_fields.empty:
     fig_fields = create_field_distribution_chart(df_fields, taxonomy)
@@ -387,6 +443,7 @@ else:
 
 # Subfield treemap
 st.subheader("Research Subfields Distribution")
+st.markdown(create_domain_legend(), unsafe_allow_html=True)
 df_subfields = parse_subfield_columns(lab_data, taxonomy)
 if not df_subfields.empty:
     fig_sub = create_subfield_treemap(df_subfields)
@@ -435,7 +492,21 @@ df_int = parse_partners(
 )
 
 if not df_int.empty:
-    st.dataframe(df_int, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_int, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "Partner": st.column_config.TextColumn("Partner", width="large"),
+            "Type": st.column_config.TextColumn("Type", width="small"),
+            "Country": st.column_config.TextColumn("Country", width="medium"),
+            "Co-publications": st.column_config.NumberColumn(
+                "Co-publications", 
+                format="%d",
+                help="Number of co-publications with this partner"
+            ),
+        }
+    )
 else:
     st.info("No international partnership data available.")
 
@@ -449,7 +520,20 @@ df_fr = parse_partners(
 )
 
 if not df_fr.empty:
-    st.dataframe(df_fr, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_fr, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "Partner": st.column_config.TextColumn("Partner", width="large"),
+            "Type": st.column_config.TextColumn("Type", width="small"),
+            "Co-publications": st.column_config.NumberColumn(
+                "Co-publications", 
+                format="%d",
+                help="Number of co-publications with this partner"
+            ),
+        }
+    )
 else:
     st.info("No French partnership data available.")
 
@@ -461,7 +545,7 @@ st.header("👥 Top Authors")
 
 # Parse authors data
 def parse_authors(names_str: str, pubs_str: str, orcids_str: str, 
-                  fwci_str: str, lorraine_str: str) -> pd.DataFrame:
+                  fwci_str: str, lorraine_str: str, other_affil_str: str = "") -> pd.DataFrame:
     """Parse author data from pipe-separated strings"""
     if pd.isna(names_str) or not str(names_str).strip():
         return pd.DataFrame()
@@ -474,6 +558,7 @@ def parse_authors(names_str: str, pubs_str: str, orcids_str: str,
             for f in str(fwci_str).split("|")] if pd.notna(fwci_str) else []
     lorraine = ["Yes" if l.strip().lower() == "true" else "No" 
                 for l in str(lorraine_str).split("|")] if pd.notna(lorraine_str) else []
+    other_affil = [a.strip() for a in str(other_affil_str).split("|")] if pd.notna(other_affil_str) else []
     
     # Pad lists
     max_len = len(names)
@@ -481,21 +566,31 @@ def parse_authors(names_str: str, pubs_str: str, orcids_str: str,
     orcids += [""] * (max_len - len(orcids))
     fwci += [0.0] * (max_len - len(fwci))
     lorraine += [""] * (max_len - len(lorraine))
+    other_affil += [""] * (max_len - len(other_affil))
     
-    return pd.DataFrame({
+    df = pd.DataFrame({
         "Author": names[:10],
         "Publications": pubs[:10],
         "ORCID": orcids[:10],
         "Avg FWCI": fwci[:10],
-        "UL Affiliated": lorraine[:10]
+        "UL Affiliated": lorraine[:10],
+        "Other affiliations": other_affil[:10]
     })
+    
+    # Clean up Other affiliations (remove empty or just semicolons)
+    df["Other affiliations"] = df["Other affiliations"].apply(
+        lambda x: x.replace(";", ", ").strip(", ") if x else ""
+    )
+    
+    return df
 
 df_authors = parse_authors(
     lab_data.get("Top 10 authors (name)", ""),
     lab_data.get("Top 10 authors (pubs)", ""),
     lab_data.get("Top 10 authors (Orcid)", ""),
     lab_data.get("Top 10 authors (Average FWCI_FR)", ""),
-    lab_data.get("Top 10 authors (Is Lorraine)", "")
+    lab_data.get("Top 10 authors (Is Lorraine)", ""),
+    lab_data.get("Top 10 authors (Other internal affiliation(s))", "")
 )
 
 if not df_authors.empty:
@@ -504,8 +599,24 @@ if not df_authors.empty:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Publications": st.column_config.NumberColumn(format="%d"),
-            "Avg FWCI": st.column_config.NumberColumn(format="%.2f"),
+            "Author": st.column_config.TextColumn("Author", width="medium"),
+            "Publications": st.column_config.NumberColumn(
+                "Publications", 
+                format="%d",
+                help="Number of publications in this lab"
+            ),
+            "Avg FWCI": st.column_config.NumberColumn(
+                "Avg FWCI", 
+                format="%.2f",
+                help="Average Field-Weighted Citation Impact"
+            ),
+            "ORCID": st.column_config.TextColumn("ORCID", width="small"),
+            "UL Affiliated": st.column_config.TextColumn("UL Affiliated", width="small"),
+            "Other affiliations": st.column_config.TextColumn(
+                "Other UL affiliations", 
+                width="medium",
+                help="Other labs or structures within UL"
+            ),
         }
     )
 else:
