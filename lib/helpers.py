@@ -21,19 +21,27 @@ import pandas as pd
 YEAR_START, YEAR_END = 2019, 2023
 YEARS = list(range(YEAR_START, YEAR_END + 1))
 
-# Domain order (by ID) and colors
+# Domain order (by ID) - CORRECT ORDER
+# Domain 1 = Life Sciences
+# Domain 2 = Social Sciences
+# Domain 3 = Physical Sciences
+# Domain 4 = Health Sciences
 DOMAIN_ORDER = [1, 2, 3, 4]
-DOMAIN_NAMES_ORDERED = ["Life Sciences", "Health Sciences", "Physical Sciences", "Social Sciences"]
+DOMAIN_NAMES_ORDERED = ["Life Sciences", "Social Sciences", "Physical Sciences", "Health Sciences"]
 
+# Domain colors - mapped correctly by ID
 DOMAIN_COLORS = {
-    1: "#0CA750",
-    2: "#F85C32",
-    3: "#8190FF",
-    4: "#FFCB3A",
+    # By ID
+    1: "#0CA750",   # Life Sciences (green)
+    2: "#FFCB3A",   # Social Sciences (yellow)
+    3: "#8190FF",   # Physical Sciences (blue)
+    4: "#F85C32",   # Health Sciences (red/orange)
+    # By name
     "Life Sciences": "#0CA750",
-    "Health Sciences": "#F85C32",
-    "Physical Sciences": "#8190FF",
     "Social Sciences": "#FFCB3A",
+    "Physical Sciences": "#8190FF",
+    "Health Sciences": "#F85C32",
+    # Fallback
     "Other": "#7f7f7f",
 }
 
@@ -65,8 +73,6 @@ def safe_float(val: Any) -> float:
 # ============================================================================
 # TAXONOMY LOOKUPS
 # ============================================================================
-# These functions require get_topics_df() to be passed or use a cached version.
-# We use a module-level cache that gets populated on first call.
 
 _TAXONOMY_CACHE: Dict[str, Any] = {}
 
@@ -77,7 +83,6 @@ def _ensure_taxonomy_loaded(topics_df: pd.DataFrame | None = None) -> pd.DataFra
         if topics_df is not None:
             _TAXONOMY_CACHE["df"] = topics_df
         else:
-            # Lazy import to avoid circular dependency
             from lib.data_cache import get_topics_df
             _TAXONOMY_CACHE["df"] = get_topics_df()
     return _TAXONOMY_CACHE["df"]
@@ -183,8 +188,7 @@ def get_subfield_id_to_domain_id() -> Dict[int, int]:
 
 def get_field_order_by_domain() -> List[int]:
     """
-    Return field IDs ordered by: domain order first, then field ID ascending within domain.
-    Example: [11, 13, 24, 34, ...] (Life Sciences fields), then Health Sciences, etc.
+    Return field IDs ordered by: domain order first (1,2,3,4), then field ID ascending within domain.
     """
     if "field_order_by_domain" not in _TAXONOMY_CACHE:
         df = _ensure_taxonomy_loaded()[["domain_id", "field_id"]].drop_duplicates()
@@ -307,12 +311,6 @@ def parse_parallel_lists(cols_config: Dict[str, Tuple[str, str]]) -> pd.DataFram
     
     Args:
         cols_config: {output_col_name: (blob_value, type)} where type is 'str', 'int', 'float', 'bool'
-    
-    Example:
-        df = parse_parallel_lists({
-            "Partner": (row["Top 10 int partners (name)"], "str"),
-            "Co-pubs": (row["Top 10 int partners (copubs with structure)"], "int"),
-        })
     """
     parsed = {}
     max_len = 0
@@ -324,12 +322,11 @@ def parse_parallel_lists(cols_config: Dict[str, Tuple[str, str]]) -> pd.DataFram
             values = parse_pipe_float_list(blob)
         elif dtype == "bool":
             values = parse_pipe_bool_list(blob)
-        else:  # str
+        else:
             values = parse_pipe_str_list(blob)
         parsed[col_name] = values
         max_len = max(max_len, len(values))
     
-    # Pad all lists to same length
     for col_name, (blob, dtype) in cols_config.items():
         fill = 0 if dtype == "int" else (np.nan if dtype == "float" else (False if dtype == "bool" else ""))
         while len(parsed[col_name]) < max_len:
@@ -339,14 +336,14 @@ def parse_parallel_lists(cols_config: Dict[str, Tuple[str, str]]) -> pd.DataFram
 
 
 # ============================================================================
-# BLOB PARSERS — STRUCTURED (reusable across views)
+# BLOB PARSERS — STRUCTURED
 # ============================================================================
 
 def parse_year_domain_blob(blob: str) -> pd.DataFrame:
     """
     Parse 'Pubs per year per domain' blob.
     Format: '2019 (14 ; 19 ; 0 ; 68) | 2020 (12 ; 25 ; 1 ; 55) | ...'
-    Domain order in parentheses: 1, 2, 3, 4 (Life, Health, Physical, Social)
+    Domain order in parentheses: 1, 2, 3, 4 (Life, Social, Physical, Health)
     
     Returns DataFrame[year, domain_id, domain_name, count, color].
     """
@@ -447,12 +444,6 @@ def parse_fwci_boxplot_blob(blob: str) -> pd.DataFrame:
     Returns DataFrame[field_id, field_name, p0, p10, p25, p50, p75, p90, p100, domain_id, domain_name, color].
     Ordered by domain grouping.
     """
-    if pd.isna(blob) or not str(blob).strip():
-        return pd.DataFrame(columns=[
-            "field_id", "field_name", "p0", "p10", "p25", "p50", "p75", "p90", "p100",
-            "domain_id", "domain_name", "color"
-        ])
-    
     id2name = get_field_id_to_name()
     id2dom = get_field_id_to_domain_id()
     dom2name = get_domain_id_to_name()
@@ -460,24 +451,30 @@ def parse_fwci_boxplot_blob(blob: str) -> pd.DataFrame:
     
     # Parse blob into dict
     field_data = {}
-    for part in str(blob).split("|"):
-        part = part.strip()
-        m = re.match(r"^\s*(\d+)\s*\((.*?)\)\s*$", part)
-        if not m:
-            continue
-        field_id = int(m.group(1))
-        values = [safe_float(x) for x in m.group(2).split(";")]
-        if len(values) < 7:
-            values.extend([np.nan] * (7 - len(values)))
-        field_data[field_id] = values
+    if not pd.isna(blob) and str(blob).strip():
+        for part in str(blob).split("|"):
+            part = part.strip()
+            m = re.match(r"^\s*(\d+)\s*\((.*?)\)\s*$", part)
+            if not m:
+                continue
+            field_id = int(m.group(1))
+            values = [safe_float(x) for x in m.group(2).split(";")]
+            if len(values) < 7:
+                values.extend([np.nan] * (7 - len(values)))
+            field_data[field_id] = values
     
-    # Build rows in domain-grouped order
+    # Build rows for ALL fields in domain-grouped order
     rows = []
     for field_id in field_order:
-        if field_id not in field_data:
+        if field_id not in id2name:
             continue
-        values = field_data[field_id]
         dom_id = id2dom.get(field_id, 0)
+        
+        if field_id in field_data:
+            values = field_data[field_id]
+        else:
+            values = [np.nan] * 7
+        
         rows.append({
             "field_id": field_id,
             "field_name": id2name.get(field_id, f"Field {field_id}"),
