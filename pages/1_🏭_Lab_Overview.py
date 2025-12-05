@@ -5,7 +5,7 @@ Lab View: Single lab analysis with precomputed indicators from ul_labs.parquet.
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import List, Dict
 
 import numpy as np
 import pandas as pd
@@ -21,6 +21,8 @@ from lib.helpers import (
     # Taxonomy
     init_taxonomy, get_domain_id_to_name, get_field_id_to_name,
     get_field_order_by_domain, get_subfields_for_field,
+    get_subfield_id_to_name, get_subfield_id_to_field_id, get_subfield_id_to_domain_id,
+    get_field_id_to_domain_id,
     # Colors
     get_domain_color, get_field_color, get_subfield_color, darken_hex, hex_to_rgb,
     # Parsers
@@ -42,6 +44,28 @@ st.set_page_config(page_title="Lab View", page_icon="🏭", layout="wide")
 init_taxonomy(get_topics_df())
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Emoji markers for domains (for tables)
+DOMAIN_EMOJI = {
+    "Health Sciences": "🟥",
+    "Life Sciences": "🟩",
+    "Physical Sciences": "🟦",
+    "Social Sciences": "🟨",
+    "Other": "⬜",
+}
+
+# Document type colors
+DOCTYPE_COLORS = {
+    "Articles": "#4285F4",
+    "Reviews": "#34A853",
+    "Book chapters": "#FBBC05",
+    "Books": "#EA4335",
+    "Preprint": "#9E9E9E",
+}
+
+# ============================================================================
 # DATA LOADING
 # ============================================================================
 
@@ -51,6 +75,29 @@ lab_names = df_labs["Structure name"].dropna().astype(str).sort_values().tolist(
 if not lab_names:
     st.error("No labs found in the data.")
     st.stop()
+
+
+# ============================================================================
+# HELPER: Build OpenAlex Works URL
+# ============================================================================
+
+def build_openalex_works_url(openalex_id: str) -> str:
+    """
+    Build OpenAlex Works search URL from institution ID.
+    Format: https://openalex.org/works?page=1&filter=authorships.institutions.lineage:{ID},publication_year:2019-2023,type:types/article|types/book-chapter|types/book|types/review
+    """
+    if pd.isna(openalex_id) or not str(openalex_id).strip():
+        return ""
+    oid = str(openalex_id).strip()
+    # Extract just the ID if it's a full URL
+    if "/" in oid:
+        oid = oid.split("/")[-1]
+    return (
+        f"https://openalex.org/works?page=1&filter="
+        f"authorships.institutions.lineage:{oid},"
+        f"publication_year:2019-2023,"
+        f"type:types/article|types/book-chapter|types/book|types/review"
+    )
 
 
 # ============================================================================
@@ -90,22 +137,50 @@ def build_field_distribution_table(row: pd.Series, pubs_total: int) -> pd.DataFr
 def build_fwci_whisker_table(row: pd.Series) -> pd.DataFrame:
     """
     Build table for FWCI whisker plot with counts.
-    Returns DataFrame ordered by domain.
+    Returns DataFrame ordered by domain, including all fields (even with 0 pubs).
     """
     df = parse_fwci_boxplot_blob(row.get("FWCI boxplot per field id (centiles 0,10,25,50,75,90,100)", ""))
     
-    if df.empty:
-        return df
+    # Get all fields in domain order
+    field_order = get_field_order_by_domain()
+    id2name = get_field_id_to_name()
+    id2dom = get_field_id_to_domain_id()
+    dom2name = get_domain_id_to_name()
     
     # Add counts from Pubs per field
     df_counts = parse_positional_field_counts(row.get("Pubs per field", ""))
-    if not df_counts.empty:
-        df = df.merge(df_counts[["field_id", "count"]], on="field_id", how="left")
-    else:
-        df["count"] = 0
     
-    df["count"] = df["count"].fillna(0).astype(int)
-    return df
+    # Build complete table with all fields
+    rows = []
+    for field_id in field_order:
+        if field_id not in id2name:
+            continue
+        
+        dom_id = id2dom.get(field_id, 0)
+        field_name = id2name[field_id]
+        
+        # Get FWCI data if available
+        fwci_row = df[df["field_id"] == field_id] if not df.empty else pd.DataFrame()
+        count_row = df_counts[df_counts["field_id"] == field_id] if not df_counts.empty else pd.DataFrame()
+        
+        row_data = {
+            "field_id": field_id,
+            "field_name": field_name,
+            "p0": fwci_row["p0"].iloc[0] if not fwci_row.empty else np.nan,
+            "p10": fwci_row["p10"].iloc[0] if not fwci_row.empty else np.nan,
+            "p25": fwci_row["p25"].iloc[0] if not fwci_row.empty else np.nan,
+            "p50": fwci_row["p50"].iloc[0] if not fwci_row.empty else np.nan,
+            "p75": fwci_row["p75"].iloc[0] if not fwci_row.empty else np.nan,
+            "p90": fwci_row["p90"].iloc[0] if not fwci_row.empty else np.nan,
+            "p100": fwci_row["p100"].iloc[0] if not fwci_row.empty else np.nan,
+            "count": int(count_row["count"].iloc[0]) if not count_row.empty else 0,
+            "domain_id": dom_id,
+            "domain_name": dom2name.get(dom_id, "Other"),
+            "color": get_field_color(field_id),
+        }
+        rows.append(row_data)
+    
+    return pd.DataFrame(rows)
 
 
 def build_subfield_wordcloud_data(row: pd.Series) -> pd.DataFrame:
@@ -114,22 +189,95 @@ def build_subfield_wordcloud_data(row: pd.Series) -> pd.DataFrame:
     Returns DataFrame[subfield_id, subfield_name, count, color] with count > 0.
     """
     all_rows = []
+    sub2dom = get_subfield_id_to_domain_id()
+    sub2name = get_subfield_id_to_name()
     
     for field_id in range(11, 37):
         col_pattern = f'Pubs per subfield within .* \\(id: {field_id}\\)'
         matching_cols = [c for c in row.index if re.match(col_pattern, c)]
         if not matching_cols:
             continue
-        df_sub = parse_subfield_column(row.get(matching_cols[0], ""), field_id)
-        if not df_sub.empty:
-            all_rows.append(df_sub)
+        
+        blob = row.get(matching_cols[0], "")
+        values = parse_pipe_int_list(blob)
+        subfields = get_subfields_for_field(field_id)
+        
+        for i, count in enumerate(values):
+            if i >= len(subfields) or count <= 0:
+                continue
+            sub_id = subfields[i]
+            dom_id = sub2dom.get(sub_id, 0)
+            all_rows.append({
+                "subfield_id": sub_id,
+                "subfield_name": sub2name.get(sub_id, f"Subfield {sub_id}"),
+                "count": count,
+                "color": get_domain_color(dom_id),  # Color by domain
+            })
     
     if not all_rows:
         return pd.DataFrame(columns=["subfield_id", "subfield_name", "count", "color"])
     
-    df = pd.concat(all_rows, ignore_index=True)
-    df = df[df["count"] > 0].copy()
+    df = pd.DataFrame(all_rows)
     df = df.groupby(["subfield_id", "subfield_name", "color"], as_index=False)["count"].sum()
+    return df.sort_values("count", ascending=False).reset_index(drop=True)
+
+
+def build_subfield_table(row: pd.Series, pubs_total: int) -> pd.DataFrame:
+    """
+    Build detailed subfield table with counts, ratios vs UL, and FWCI.
+    Returns DataFrame with all subfields that have count > 0.
+    """
+    sub2name = get_subfield_id_to_name()
+    sub2field = get_subfield_id_to_field_id()
+    sub2dom = get_subfield_id_to_domain_id()
+    field2name = get_field_id_to_name()
+    dom2name = get_domain_id_to_name()
+    
+    all_rows = []
+    
+    for field_id in range(11, 37):
+        # Find columns for this field
+        count_pattern = f'Pubs per subfield within .* \\(id: {field_id}\\)'
+        ratio_pattern = f'Ratio against UL.*\\(id: {field_id}\\)'
+        fwci_pattern = f'FWCI per subfield within .* \\(id: {field_id}\\)'
+        
+        count_cols = [c for c in row.index if re.match(count_pattern, c)]
+        ratio_cols = [c for c in row.index if re.match(ratio_pattern, c)]
+        fwci_cols = [c for c in row.index if re.match(fwci_pattern, c)]
+        
+        if not count_cols:
+            continue
+        
+        counts = parse_pipe_int_list(row.get(count_cols[0], ""))
+        ratios = parse_pipe_float_list(row.get(ratio_cols[0], "")) if ratio_cols else []
+        fwcis = parse_pipe_float_list(row.get(fwci_cols[0], "")) if fwci_cols else []
+        
+        subfields = get_subfields_for_field(field_id)
+        
+        for i, sub_id in enumerate(subfields):
+            count = counts[i] if i < len(counts) else 0
+            if count <= 0:
+                continue
+            
+            dom_id = sub2dom.get(sub_id, 0)
+            dom_name = dom2name.get(dom_id, "Other")
+            
+            all_rows.append({
+                "subfield_id": sub_id,
+                "Subfield": sub2name.get(sub_id, f"Subfield {sub_id}"),
+                "Field": field2name.get(field_id, f"Field {field_id}"),
+                "Domain": dom_name,
+                "Domain marker": f"{DOMAIN_EMOJI.get(dom_name, '⬜')} {dom_name}",
+                "count": count,
+                "share_of_lab": count / max(1, pubs_total),
+                "ratio_vs_ul": ratios[i] if i < len(ratios) else np.nan,
+                "fwci": fwcis[i] if i < len(fwcis) else np.nan,
+            })
+    
+    if not all_rows:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(all_rows)
     return df.sort_values("count", ascending=False).reset_index(drop=True)
 
 
@@ -201,6 +349,65 @@ def build_french_partners_table(row: pd.Series) -> pd.DataFrame:
 # PLOTLY CHART BUILDERS
 # ============================================================================
 
+def plot_doctype_pie(row: pd.Series) -> go.Figure:
+    """
+    Create pie chart for document type distribution.
+    Expects columns: Pubs articles, Pubs reviews, Pubs book chapters, Pubs books
+    """
+    # Try to get doc type counts - adjust column names as needed
+    articles = safe_int(row.get("Pubs articles", 0))
+    reviews = safe_int(row.get("Pubs reviews", 0))
+    chapters = safe_int(row.get("Pubs book chapters", 0))
+    books = safe_int(row.get("Pubs books", 0))
+    
+    # If columns don't exist, try alternative names or compute from total
+    total = safe_int(row.get("Pubs total", 0))
+    if articles + reviews + chapters + books == 0 and total > 0:
+        # Fallback: assume all are articles if no breakdown available
+        articles = total
+    
+    labels = ["Articles", "Reviews", "Book chapters", "Books"]
+    values = [articles, reviews, chapters, books]
+    colors = [DOCTYPE_COLORS.get(l, "#9E9E9E") for l in labels]
+    
+    # Filter out zero values
+    data = [(l, v, c) for l, v, c in zip(labels, values, colors) if v > 0]
+    
+    if not data:
+        fig = go.Figure()
+        fig.add_annotation(text="No data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(height=250, margin=dict(t=10, b=10, l=10, r=10))
+        return fig
+    
+    labels_f, values_f, colors_f = zip(*data)
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=labels_f,
+        values=values_f,
+        marker=dict(colors=colors_f, line=dict(color='white', width=2)),
+        textinfo='percent',
+        textposition='inside',
+        insidetextorientation='horizontal',
+        hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>Share: %{percent}<extra></extra>",
+        hole=0.0,
+    )])
+    
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.1,
+            xanchor="center",
+            x=0.5,
+        ),
+        margin=dict(t=10, b=60, l=10, r=10),
+        height=280,
+    )
+    
+    return fig
+
+
 def plot_yearly_stacked_by_domain(df_yr_dom: pd.DataFrame, title: str = "") -> go.Figure:
     """Stacked bar chart of publications by year and domain."""
     if df_yr_dom.empty:
@@ -230,11 +437,17 @@ def plot_yearly_stacked_by_domain(df_yr_dom: pd.DataFrame, title: str = "") -> g
 
 
 def plot_field_distribution(df_fields: pd.DataFrame, title: str = "") -> go.Figure:
-    """Horizontal bar chart of field distribution with ISITE overlay."""
+    """Horizontal bar chart of field distribution with ISITE overlay and count gutter."""
     if df_fields.empty:
         fig = go.Figure()
         fig.add_annotation(text="No data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return fig
+    
+    # Calculate gutter size
+    max_share = float(df_fields["share"].max() or 0.0)
+    if max_share <= 0:
+        max_share = 0.01
+    gutter = max_share * 0.20
     
     fig = go.Figure()
     
@@ -243,11 +456,9 @@ def plot_field_distribution(df_fields: pd.DataFrame, title: str = "") -> go.Figu
         y=df_fields["field_name"],
         x=df_fields["share"],
         orientation="h",
-        marker_color=df_fields["color"],
+        marker_color=df_fields["color"].tolist(),
         name="Total",
-        text=[f"{c:,}" for c in df_fields["count"]],
-        textposition="outside",
-        hovertemplate="<b>%{y}</b><br>Total: %{x:.1%}<br>Count: %{text}<extra></extra>",
+        hovertemplate="<b>%{y}</b><br>Total: %{x:.1%}<extra></extra>",
     ))
     
     # ISITE overlay bars
@@ -255,11 +466,23 @@ def plot_field_distribution(df_fields: pd.DataFrame, title: str = "") -> go.Figu
         y=df_fields["field_name"],
         x=df_fields["isite_share"],
         orientation="h",
-        marker_color=df_fields["color_dark"],
+        marker_color=df_fields["color_dark"].tolist(),
         name="ISITE",
         width=0.5,
         hovertemplate="<b>%{y}</b><br>ISITE: %{x:.1%}<extra></extra>",
     ))
+    
+    # Add count annotations in the gutter
+    for field_name, cnt in zip(df_fields["field_name"], df_fields["count"]):
+        fig.add_annotation(
+            x=-gutter * 0.95,
+            y=field_name,
+            text=f"{int(cnt):,}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(size=11, color="#444"),
+        )
     
     fig.update_layout(
         barmode="overlay",
@@ -267,95 +490,116 @@ def plot_field_distribution(df_fields: pd.DataFrame, title: str = "") -> go.Figu
         xaxis=dict(
             title="% of lab publications",
             tickformat=".0%",
-            range=[0, df_fields["share"].max() * 1.15],
+            range=[-gutter, max_share * 1.10],
+            showgrid=True,
+            gridcolor="#e0e0e0",
         ),
-        yaxis=dict(autorange="reversed", title=""),
+        yaxis=dict(autorange="reversed", title="", tickfont=dict(size=12)),
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         template="plotly_white",
         margin=dict(l=10, r=10, t=60, b=40),
-        height=max(400, len(df_fields) * 25 + 100),
+        height=max(450, len(df_fields) * 22 + 120),
     )
     return fig
 
 
 def plot_fwci_whiskers(df_fwci: pd.DataFrame, title: str = "") -> go.Figure:
-    """Horizontal box-whisker plot for FWCI distribution per field."""
+    """
+    Horizontal box-whisker plot for FWCI distribution per field.
+    Uses centiles 0, 25, 50, 75, 100 only.
+    Shows all fields including those with 0 publications.
+    """
     if df_fwci.empty:
         fig = go.Figure()
         fig.add_annotation(text="No data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return fig
     
+    # Calculate max for this lab only (not all labs)
+    valid_p100 = df_fwci.loc[df_fwci["count"] > 0, "p100"]
+    xmax = float(valid_p100.max()) if not valid_p100.empty and not valid_p100.isna().all() else 5.0
+    if xmax <= 0:
+        xmax = 5.0
+    
+    # Gutter for count labels
+    gutter = xmax * 0.15
+    
     fig = go.Figure()
     
-    # We'll use shapes for whiskers and boxes
     for i, row in df_fwci.iterrows():
         y = row["field_name"]
         color = row["color"]
+        count = row["count"]
         
-        # Skip if no data
-        if row["count"] <= 0 or pd.isna(row["p50"]):
-            continue
-        
-        # Whisker line (p10 to p90)
-        if pd.notna(row["p10"]) and pd.notna(row["p90"]):
-            fig.add_trace(go.Scatter(
-                x=[row["p10"], row["p90"]],
-                y=[y, y],
-                mode="lines",
-                line=dict(color=color, width=2),
-                showlegend=False,
-                hoverinfo="skip",
-            ))
-        
-        # Box (p25 to p75) using a bar
-        if pd.notna(row["p25"]) and pd.notna(row["p75"]):
-            fig.add_trace(go.Bar(
-                x=[row["p75"] - row["p25"]],
-                y=[y],
-                base=row["p25"],
-                orientation="h",
-                marker=dict(color=color, opacity=0.3),
-                width=0.6,
-                showlegend=False,
-                hovertemplate=f"<b>{y}</b><br>Q1: {row['p25']:.2f}<br>Median: {row['p50']:.2f}<br>Q3: {row['p75']:.2f}<extra></extra>",
-            ))
-        
-        # Median marker
-        if pd.notna(row["p50"]):
-            fig.add_trace(go.Scatter(
-                x=[row["p50"]],
-                y=[y],
-                mode="markers",
-                marker=dict(color=color, size=10, symbol="line-ns", line=dict(width=3, color=color)),
-                showlegend=False,
-                hovertemplate=f"<b>{y}</b><br>Median: {row['p50']:.2f}<extra></extra>",
-            ))
+        # Draw elements only if count > 0 and we have data
+        if count > 0 and pd.notna(row["p50"]):
+            # Whisker line (p0 to p100)
+            if pd.notna(row["p0"]) and pd.notna(row["p100"]):
+                fig.add_trace(go.Scatter(
+                    x=[row["p0"], row["p100"]],
+                    y=[y, y],
+                    mode="lines",
+                    line=dict(color=color, width=2),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+            
+            # Box (p25 to p75) using a bar
+            if pd.notna(row["p25"]) and pd.notna(row["p75"]) and row["p75"] >= row["p25"]:
+                fig.add_trace(go.Bar(
+                    x=[row["p75"] - row["p25"]],
+                    y=[y],
+                    base=row["p25"],
+                    orientation="h",
+                    marker=dict(color=color, opacity=0.3),
+                    width=0.6,
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{y}</b><br>"
+                        f"Min: {row['p0']:.2f}<br>"
+                        f"Q1: {row['p25']:.2f}<br>"
+                        f"Median: {row['p50']:.2f}<br>"
+                        f"Q3: {row['p75']:.2f}<br>"
+                        f"Max: {row['p100']:.2f}<extra></extra>"
+                    ),
+                ))
+            
+            # Median marker
+            if pd.notna(row["p50"]):
+                fig.add_trace(go.Scatter(
+                    x=[row["p50"]],
+                    y=[y],
+                    mode="markers",
+                    marker=dict(color=color, size=10, symbol="line-ns", line=dict(width=3, color=color)),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
     
-    # Add count annotations
+    # Add count annotations in gutter for ALL fields
     for i, row in df_fwci.iterrows():
-        if row["count"] > 0:
-            fig.add_annotation(
-                x=-0.02,
-                y=row["field_name"],
-                text=f"{row['count']:,}",
-                xref="paper",
-                yref="y",
-                showarrow=False,
-                xanchor="right",
-                font=dict(size=10, color="#666"),
-            )
-    
-    xmax = df_fwci["p100"].max() if not df_fwci["p100"].isna().all() else 5
+        fig.add_annotation(
+            x=-gutter * 0.95,
+            y=row["field_name"],
+            text=f"{int(row['count']):,}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(size=11, color="#444"),
+        )
     
     fig.update_layout(
         title=title,
-        xaxis=dict(title="FWCI (France)", range=[0, xmax * 1.1]),
-        yaxis=dict(autorange="reversed", title=""),
+        xaxis=dict(
+            title="FWCI (France)",
+            range=[-gutter, xmax * 1.10],
+            showgrid=True,
+            gridcolor="#e0e0e0",
+        ),
+        yaxis=dict(autorange="reversed", title="", tickfont=dict(size=12)),
         showlegend=False,
         template="plotly_white",
         margin=dict(l=10, r=10, t=60, b=40),
-        height=max(400, len(df_fwci) * 25 + 100),
+        height=max(450, len(df_fwci) * 22 + 120),
         barmode="overlay",
     )
     return fig
@@ -448,8 +692,8 @@ summary["% ISITE"] = summary["Pubs ISITE"] / summary["Publications"].replace(0, 
 summary["% international"] = summary["Pubs international"] / summary["Publications"].replace(0, np.nan) * 100
 summary["% with company"] = summary["Pubs with company"] / summary["Publications"].replace(0, np.nan) * 100
 
-# Build OpenAlex link
-summary["OpenAlex"] = summary["OpenAlex ID"].apply(build_openalex_url)
+# Build OpenAlex Works URL
+summary["OpenAlex"] = summary["OpenAlex ID"].apply(build_openalex_works_url)
 
 summary = summary.sort_values("Publications", ascending=False)
 
@@ -467,9 +711,9 @@ st.dataframe(
         "Pole": st.column_config.TextColumn("Pole"),
         "Publications": st.column_config.NumberColumn("Publications", format="%.0f"),
         "Pubs ISITE": st.column_config.NumberColumn("Pubs ISITE", format="%.0f"),
-        "% ISITE": st.column_config.ProgressColumn("% ISITE", format="%.1f%%", min_value=0, max_value=summary["% ISITE"].max()),
-        "% international": st.column_config.ProgressColumn("% international", format="%.1f%%", min_value=0, max_value=summary["% international"].max()),
-        "% with company": st.column_config.ProgressColumn("% with company", format="%.1f%%", min_value=0, max_value=summary["% with company"].max()),
+        "% ISITE": st.column_config.ProgressColumn("% ISITE", format="%.1f%%", min_value=0, max_value=summary["% ISITE"].max() or 100),
+        "% international": st.column_config.ProgressColumn("% international", format="%.1f%%", min_value=0, max_value=summary["% international"].max() or 100),
+        "% with company": st.column_config.ProgressColumn("% with company", format="%.1f%%", min_value=0, max_value=summary["% with company"].max() or 100),
         "Pubs PPtop10% (subfield)": st.column_config.NumberColumn("Top 10%", format="%.0f"),
         "Pubs PPtop1% (subfield)": st.column_config.NumberColumn("Top 1%", format="%.0f"),
         "OpenAlex": st.column_config.LinkColumn("OpenAlex"),
@@ -489,12 +733,64 @@ selected_lab = st.selectbox("Select a lab", lab_names, index=0)
 row = df_labs.loc[df_labs["Structure name"] == selected_lab].iloc[0]
 pubs_total = safe_int(row.get("Pubs total", 0))
 
-# --- KPI Row ---
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Publications (2019–2023)", f"{pubs_total:,}")
-k2.metric("… incl. ISITE", f"{safe_int(row.get('Pubs ISITE (In_LUE)', 0)):,}")
-k3.metric("… incl. Top 10%", f"{safe_int(row.get('Pubs PPtop10% (subfield)', 0)):,}")
-k4.metric("… incl. Top 1%", f"{safe_int(row.get('Pubs PPtop1% (subfield)', 0)):,}")
+# --- Lab Profile Section ---
+st.markdown("---")
+
+col_info, col_pie, col_metrics = st.columns([2, 1, 1])
+
+with col_info:
+    st.markdown(f"### {selected_lab}")
+    st.write(f"**Type:** {row.get('Structure type', '—')}")
+    st.write(f"**Pole:** {row.get('Pole', '—')}")
+    st.write(f"**ROR:** {row.get('ROR', '—')}")
+    
+    # OpenAlex link
+    oa_url = build_openalex_works_url(row.get("OpenAlex ID", ""))
+    if oa_url:
+        st.markdown(f"[🔗 View in OpenAlex]({oa_url})")
+    
+    # Big number display
+    st.markdown(
+        f"<div style='font-size:48px;font-weight:bold;color:#E63946;margin:20px 0;'>{pubs_total:,}</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        """<div style='color:#666;font-size:14px;'>
+        <strong>Total publications (2019–2023)</strong><br/>
+        Includes articles, reviews, book chapters, and books.
+        </div>""",
+        unsafe_allow_html=True
+    )
+
+with col_pie:
+    st.markdown("**Document types**")
+    fig_pie = plot_doctype_pie(row)
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+with col_metrics:
+    st.markdown("**Key indicators**")
+    
+    pubs_isite = safe_int(row.get("Pubs ISITE (In_LUE)", 0))
+    pct_isite = (pubs_isite / pubs_total * 100) if pubs_total > 0 else 0
+    st.metric("ISITE publications", f"{pubs_isite:,}", f"{pct_isite:.1f}%")
+    
+    pubs_top10 = safe_int(row.get("Pubs PPtop10% (subfield)", 0))
+    pct_top10 = (pubs_top10 / pubs_total * 100) if pubs_total > 0 else 0
+    st.metric("Top 10%", f"{pubs_top10:,}", f"{pct_top10:.1f}%")
+    
+    pubs_top1 = safe_int(row.get("Pubs PPtop1% (subfield)", 0))
+    pct_top1 = (pubs_top1 / pubs_total * 100) if pubs_total > 0 else 0
+    st.metric("Top 1%", f"{pubs_top1:,}", f"{pct_top1:.1f}%")
+    
+    pubs_intl = safe_int(row.get("Pubs international", 0))
+    pct_intl = (pubs_intl / pubs_total * 100) if pubs_total > 0 else 0
+    st.metric("% International", f"{pct_intl:.1f}%")
+    
+    pubs_company = safe_int(row.get("Pubs with company", 0))
+    pct_company = (pubs_company / pubs_total * 100) if pubs_total > 0 else 0
+    st.metric("% With industry", f"{pct_company:.1f}%")
+
+st.markdown("---")
 
 # --- Domain Legend ---
 render_domain_legend()
@@ -524,10 +820,57 @@ st.plotly_chart(fig_fwci, use_container_width=True)
 
 st.markdown("---")
 
-# --- Top 5 Internal Partners ---
-st.markdown("#### Top 5 Internal Partners")
+# --- Subfield Detail Table ---
+st.markdown("#### Subfield Detail")
+
+df_subfield_table = build_subfield_table(row, pubs_total)
+
+if df_subfield_table.empty:
+    st.info("No subfield-level data for this lab.")
+else:
+    df_sub_display = df_subfield_table[[
+        "Domain marker", "Field", "Subfield", "count", "share_of_lab", "ratio_vs_ul", "fwci"
+    ]].rename(columns={
+        "Domain marker": "Domain",
+        "count": "Publications",
+        "share_of_lab": "% of lab total",
+        "ratio_vs_ul": "% of UL in this subfield",
+        "fwci": "Avg FWCI",
+    })
+    
+    st.dataframe(
+        df_sub_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Domain": st.column_config.TextColumn("Domain"),
+            "Field": st.column_config.TextColumn("Field"),
+            "Subfield": st.column_config.TextColumn("Subfield"),
+            "Publications": st.column_config.NumberColumn("Publications", format="%d"),
+            "% of lab total": st.column_config.ProgressColumn(
+                "% of lab total",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="Fraction of this lab's publications in this subfield.",
+            ),
+            "% of UL in this subfield": st.column_config.ProgressColumn(
+                "% of UL in this subfield",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="Share of UL's total publications in this subfield that come from this lab.",
+            ),
+            "Avg FWCI": st.column_config.NumberColumn("Avg FWCI", format="%.2f"),
+        },
+    )
+
+st.markdown("---")
+
+# --- Top 10 Internal Partners ---
+st.markdown("#### Top 10 Internal Partners")
 df_collabs = parse_internal_collabs_blob(row.get("Top 10 internal lab/other collabs (type,count,ratio,FWCI)", ""))
-df_collabs = pad_dataframe(df_collabs.head(5), 5, numeric_cols=["count", "ratio", "fwci"])
+df_collabs = pad_dataframe(df_collabs.head(10), 10, numeric_cols=["count", "ratio", "fwci"])
 df_collabs["% of lab pubs"] = df_collabs["ratio"] * 100
 
 st.dataframe(
@@ -539,7 +882,12 @@ st.dataframe(
         "name": st.column_config.TextColumn("Partner"),
         "type": st.column_config.TextColumn("Type"),
         "count": st.column_config.NumberColumn("Co-pubs", format="%.0f"),
-        "% of lab pubs": st.column_config.ProgressColumn("% of lab pubs", format="%.1f%%", min_value=0, max_value=df_collabs["% of lab pubs"].max() or 100),
+        "% of lab pubs": st.column_config.ProgressColumn(
+            "% of lab pubs",
+            format="%.1f%%",
+            min_value=0,
+            max_value=df_collabs["% of lab pubs"].max() or 100
+        ),
         "fwci": st.column_config.NumberColumn("Avg FWCI", format="%.2f"),
     },
 )
