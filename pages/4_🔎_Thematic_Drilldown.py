@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import re
 
 from lib.helpers import (
     DOMAIN_ORDER,
@@ -64,7 +65,7 @@ CHILD_LEVEL_LABELS = {
 
 STRUCTURE_TYPE_COLORS = {
     "lab": "#4e79a7",
-    "facility": "#f28e2b",
+    "experimental": "#f28e2b",
     "other": "#76b7b2",
 }
 
@@ -96,8 +97,10 @@ def load_lab_info():
     """Load lab names and types from structures file."""
     try:
         df = pd.read_parquet("data/ul_labs.parquet")
+        # Index by structure_key (which is the ROR in the contributions file)
         return df.set_index("structure_key")[["Structure name", "Structure type"]].to_dict("index")
-    except:
+    except Exception as e:
+        st.warning(f"Could not load lab info: {e}")
         return {}
 
 df_overview = load_thematic_overview()
@@ -153,6 +156,14 @@ def parse_top_items(blob, expected_fields):
             row = {field: parts[i] for i, field in enumerate(expected_fields)}
             results.append(row)
     return results
+
+def add_spaces_to_name(name):
+    """Add spaces before capital letters in compressed names like 'MichaëlBadawi' -> 'Michaël Badawi'."""
+    if not name:
+        return name
+    # Add space before uppercase letters that follow lowercase letters
+    spaced = re.sub(r'([a-zàâäéèêëïîôùûüç])([A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ])', r'\1 \2', str(name))
+    return spaced
 
 def get_element_options(level):
     """Get available elements for a given level."""
@@ -253,8 +264,6 @@ level_label = LEVEL_LABELS.get(level, level.title())
 
 # Display element name as header
 st.markdown(f"## {element_name}")
-if level != "research_topic":
-    render_domain_legend()
 
 # =============================================================================
 # Section 2: Topline KPIs
@@ -274,11 +283,8 @@ with kpi_cols1[1]:
 with kpi_cols1[2]:
     st.metric("CAGR 2019-23", format_cagr(element_data['cagr_2019_2023']))
 
-with kpi_cols1[3]:
-    st.metric("% SDG-related", format_pct(element_data['pct_sdg']))
-
-# Impact section
-st.markdown("#### 🎯 Impact & Excellence")
+# Citation Impact section
+st.markdown("#### 🎯 Citation Impact")
 kpi_cols2 = st.columns(4)
 
 with kpi_cols2[0]:
@@ -297,8 +303,8 @@ with kpi_cols2[2]:
 with kpi_cols2[3]:
     st.metric("% Top 1%", format_pct(element_data['pct_top1']))
 
-# Collaboration & Funding section
-st.markdown("#### 🤝 Collaboration & Funding")
+# Collaborations section
+st.markdown("#### 🤝 Collaborations")
 kpi_cols3 = st.columns(4)
 
 with kpi_cols3[0]:
@@ -307,7 +313,14 @@ with kpi_cols3[0]:
 with kpi_cols3[1]:
     st.metric("🏢 % Company", format_pct(element_data['pct_company']))
 
-with kpi_cols3[2]:
+# Challenge-oriented section
+st.markdown("#### 🌱 Challenge-oriented")
+kpi_cols4 = st.columns(4)
+
+with kpi_cols4[0]:
+    st.metric("% SDG-related", format_pct(element_data['pct_sdg']))
+
+with kpi_cols4[1]:
     st.metric("% ISITE", format_pct(element_data['pct_isite']))
 
 # =============================================================================
@@ -339,8 +352,8 @@ if level in ["domain", "field", "subfield"]:
             sub_table.append({
                 "Name": row["child_name"],
                 "Pubs": int(row["pubs_total"]),
-                f"% of {level_label}": row["pubs_pct_of_parent"],
-                "% ISITE": row["pct_isite"],
+                f"% of {level_label}": row["pubs_pct_of_parent"] * 100,  # Multiply by 100 for progress bar
+                "% ISITE": row["pct_isite"] * 100,  # Multiply by 100 for progress bar
                 "% Top 10%": format_pct(row["pct_top10"]),
                 "% Top 1%": format_pct(row["pct_top1"]),
                 "% Int'l": format_pct(row["pct_international"]),
@@ -359,13 +372,13 @@ if level in ["domain", "field", "subfield"]:
                 f"% of {level_label}": st.column_config.ProgressColumn(
                     f"% of {level_label}",
                     min_value=0,
-                    max_value=1,
+                    max_value=100,
                     format="%.1f%%",
                 ),
                 "% ISITE": st.column_config.ProgressColumn(
                     "% ISITE",
                     min_value=0,
-                    max_value=1,
+                    max_value=100,
                     format="%.1f%%",
                 ),
             }
@@ -405,14 +418,6 @@ if level in ["domain", "field", "subfield"]:
             color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set2
             color_map = {name: color_palette[i % len(color_palette)] for i, name in enumerate(all_names)}
             
-            # Legend (shared)
-            st.markdown("**Legend:**")
-            legend_items = " · ".join([
-                f'<span style="color:{color_map[name]}">●</span> {name}'
-                for name in all_names if name in df_time_plot["Name"].unique()
-            ])
-            st.markdown(f'<div style="margin-bottom:16px;font-size:0.9em;">{legend_items}</div>', unsafe_allow_html=True)
-            
             # Absolute values chart
             st.markdown("**Absolute values**")
             fig_abs = px.line(
@@ -426,9 +431,9 @@ if level in ["domain", "field", "subfield"]:
             fig_abs.update_layout(
                 height=400,
                 margin=dict(t=30, l=50, r=30, b=50),
-                showlegend=False,
                 xaxis=dict(dtick=1),
                 yaxis_title="Publications",
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
             )
             st.plotly_chart(fig_abs, use_container_width=True)
             
@@ -449,9 +454,9 @@ if level in ["domain", "field", "subfield"]:
             fig_stack.update_layout(
                 height=400,
                 margin=dict(t=30, l=50, r=30, b=50),
-                showlegend=False,
                 xaxis=dict(dtick=1),
                 yaxis=dict(title="Share (%)", range=[0, 100]),
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
             )
             st.plotly_chart(fig_stack, use_container_width=True)
     else:
@@ -526,8 +531,8 @@ if contrib_data is not None:
     else:
         st.info("No department data.")
     
-    # Top 10 Labs
-    st.markdown("**Top 10 Labs / Structures**")
+    # Top 10 Labs / Internal Structures
+    st.markdown("**Top 10 Labs / Internal Structures**")
     render_structure_type_legend()
     
     lab_items = parse_top_items(
@@ -539,13 +544,27 @@ if contrib_data is not None:
         lab_df["count"] = lab_df["count"].apply(safe_int)
         lab_df["pct"] = lab_df["pct"].apply(safe_float)
         
-        # Join with lab info
-        lab_df["name"] = lab_df["ror"].apply(
-            lambda x: lab_info.get(x, {}).get("Structure name", x) if x in lab_info else x
-        )
-        lab_df["type"] = lab_df["ror"].apply(
-            lambda x: lab_info.get(x, {}).get("Structure type", "other") if x in lab_info else "other"
-        )
+        # Join with lab info using structure_key (which matches the ROR format)
+        def get_lab_name(ror):
+            # Try with ROR: prefix first
+            key_with_prefix = f"ROR:{ror}"
+            if key_with_prefix in lab_info:
+                return lab_info[key_with_prefix].get("Structure name", ror)
+            # Try without prefix
+            if ror in lab_info:
+                return lab_info[ror].get("Structure name", ror)
+            return ror
+        
+        def get_lab_type(ror):
+            key_with_prefix = f"ROR:{ror}"
+            if key_with_prefix in lab_info:
+                return lab_info[key_with_prefix].get("Structure type", "other")
+            if ror in lab_info:
+                return lab_info[ror].get("Structure type", "other")
+            return "other"
+        
+        lab_df["name"] = lab_df["ror"].apply(get_lab_name)
+        lab_df["type"] = lab_df["ror"].apply(get_lab_type)
         lab_df["color"] = lab_df["type"].apply(lambda x: STRUCTURE_TYPE_COLORS.get(x, STRUCTURE_TYPE_COLORS["other"]))
         
         lab_df = lab_df.sort_values("count", ascending=True).tail(10)
@@ -578,7 +597,7 @@ partner_data = get_partner_data(level, element_id)
 
 if partner_data is not None:
     # International Partners
-    st.markdown("**Top 10 International Partners**")
+    st.markdown("**Top 20 International Partners**")
     int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
     int_items = parse_top_items(
         partner_data.get(int_col, ""),
@@ -592,15 +611,28 @@ if partner_data is not None:
         
         int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
         int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
-        int_display[f"% of {element_name}"] = int_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        # Convert to percentage scale for progress bar
+        int_display[f"% of {element_name}"] = int_display[f"% of {element_name}"] * 100
         int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
-        st.dataframe(int_display, use_container_width=True, hide_index=True)
+        st.dataframe(
+            int_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                f"% of {element_name}": st.column_config.ProgressColumn(
+                    f"% of {element_name}",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+            }
+        )
     else:
         st.info("No international partner data.")
     
     # French Partners
-    st.markdown("**Top 10 French Partners**")
+    st.markdown("**Top 20 French Partners**")
     fr_col = [c for c in df_partners.columns if "top_fr_partners" in c][0]
     fr_items = parse_top_items(
         partner_data.get(fr_col, ""),
@@ -614,10 +646,23 @@ if partner_data is not None:
         
         fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
         fr_display.columns = ["Partner", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
-        fr_display[f"% of {element_name}"] = fr_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        # Convert to percentage scale for progress bar
+        fr_display[f"% of {element_name}"] = fr_display[f"% of {element_name}"] * 100
         fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
-        st.dataframe(fr_display, use_container_width=True, hide_index=True)
+        st.dataframe(
+            fr_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                f"% of {element_name}": st.column_config.ProgressColumn(
+                    f"% of {element_name}",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+            }
+        )
     else:
         st.info("No French partner data.")
 
@@ -775,6 +820,8 @@ if author_data is not None:
         auth_df["pct"] = auth_df["pct"].apply(safe_float)
         auth_df["fwci"] = auth_df["fwci"].apply(safe_float)
         auth_df["is_lorraine"] = auth_df["is_lorraine"].apply(lambda x: x.lower() == "true" if isinstance(x, str) else bool(x))
+        # Fix compressed names
+        auth_df["name"] = auth_df["name"].apply(add_spaces_to_name)
         
         auth_display = auth_df[["name", "orcid", "pubs", "pct", "fwci", "is_lorraine", "labs"]].copy()
         auth_display.columns = ["Author", "ORCID", "Pubs", f"% of {element_name}", "Avg FWCI", "UL Affiliation", "Labs"]
