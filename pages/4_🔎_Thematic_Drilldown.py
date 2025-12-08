@@ -1,15 +1,5 @@
 """
 Thematic Drill-Down - Detailed exploration of a specific domain, field, subfield, or research topic.
-
-Sections:
-1. Selector (level + element)
-2. Topline KPIs
-3. Sublevel breakdown table (for OA taxonomy)
-4. Time evolution charts (absolute + stacked)
-5. Contribution analysis (research topics, departments, labs)
-6. Partner tables (international, national)
-7. Strategic reciprocity chart (for OA taxonomy)
-8. Top authors table
 """
 
 import streamlit as st
@@ -20,19 +10,25 @@ import plotly.graph_objects as go
 import re
 
 from lib.helpers import (
-    DOMAIN_ORDER,
-    DOMAIN_COLORS,
-    DOMAIN_EMOJI,
-    DOMAIN_NAMES_ORDERED,
     get_domain_id_to_name,
     get_field_id_to_name,
     get_field_id_to_domain_id,
     get_subfield_id_to_name,
     get_subfield_id_to_domain_id,
-    get_domain_color,
-    render_domain_legend,
+    get_subfields_for_field,
     safe_float,
     safe_int,
+)
+
+from lib.data_cache import (
+    load_thematic_overview,
+    load_thematic_sublevels,
+    load_thematic_contributions,
+    load_thematic_partners,
+    load_thematic_authors,
+    load_lab_info,
+    load_partners_base,
+    load_tm_labels,
 )
 
 # =============================================================================
@@ -72,46 +68,6 @@ STRUCTURE_TYPE_COLORS = {
 # =============================================================================
 # Load data
 # =============================================================================
-@st.cache_data
-def load_thematic_overview():
-    return pd.read_parquet("data/thematic_overview.parquet")
-
-@st.cache_data
-def load_thematic_sublevels():
-    return pd.read_parquet("data/thematic_detail_sublevels.parquet")
-
-@st.cache_data
-def load_thematic_contributions():
-    return pd.read_parquet("data/thematic_detail_contributions.parquet")
-
-@st.cache_data
-def load_thematic_partners():
-    return pd.read_parquet("data/thematic_detail_partners.parquet")
-
-@st.cache_data
-def load_thematic_authors():
-    return pd.read_parquet("data/thematic_detail_authors.parquet")
-
-@st.cache_data
-def load_lab_info():
-    """Load lab names and types from structures file."""
-    try:
-        df = pd.read_parquet("data/ul_labs.parquet")
-        # Index by structure_key (which is the ROR in the contributions file)
-        return df.set_index("structure_key")[["Structure name", "Structure type"]].to_dict("index")
-    except Exception as e:
-        st.warning(f"Could not load lab info: {e}")
-        return {}
-
-@st.cache_data
-def load_partners_base():
-    """Load partner base data for reciprocity calculations."""
-    try:
-        return pd.read_parquet("data/ul_partners_base.parquet")
-    except Exception as e:
-        st.warning(f"Could not load partners base: {e}")
-        return pd.DataFrame()
-
 df_overview = load_thematic_overview()
 df_sublevels = load_thematic_sublevels()
 df_contributions = load_thematic_contributions()
@@ -119,6 +75,7 @@ df_partners = load_thematic_partners()
 df_authors = load_thematic_authors()
 lab_info = load_lab_info()
 df_partners_base = load_partners_base()
+df_tm_labels = load_tm_labels()
 
 # Lookups
 domain_id2name = get_domain_id_to_name()
@@ -168,10 +125,9 @@ def parse_top_items(blob, expected_fields):
     return results
 
 def add_spaces_to_name(name):
-    """Add spaces before capital letters in compressed names like 'MichaëlBadawi' -> 'Michaël Badawi'."""
+    """Add spaces before capital letters in compressed names."""
     if not name:
         return name
-    # Add space before uppercase letters that follow lowercase letters
     spaced = re.sub(r'([a-zàâäéèêëïîôùûüç])([A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ])', r'\1 \2', str(name))
     return spaced
 
@@ -225,15 +181,10 @@ def get_author_data(level, element_id):
 def get_partner_total_in_theme(partner_id, level, element_id):
     """
     Get partner's total publications in a specific thematic area from ul_partners_base.parquet.
-    
-    For domains: Use "Pubs breakdown per domain (partner total)" - pipe-separated, order: domain 1,2,3,4
-    For fields: Use "Pubs breakdown per field (partner total)" - pipe-separated, ascending field ID order (11-36)
-    For subfields: Use "Pubs per subfield within X (id: Y) (partner total)" columns
     """
     if df_partners_base.empty:
         return 0
     
-    # Find the partner row
     partner_row = df_partners_base[df_partners_base["Partner ID"] == partner_id]
     if partner_row.empty:
         return 0
@@ -245,59 +196,93 @@ def get_partner_total_in_theme(partner_id, level, element_id):
         return 0
     
     if level == "domain":
-        # Domains are stored as "count1 | count2 | count3 | count4" for domains 1,2,3,4
         blob = partner_row.get("Pubs breakdown per domain (partner total)", "")
         if pd.isna(blob) or not str(blob).strip():
             return 0
         vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        # Domain IDs are 1,2,3,4 - index is domain_id - 1
         idx = element_id_int - 1
         return vals[idx] if 0 <= idx < len(vals) else 0
     
     elif level == "field":
-        # Fields are stored in ascending order of field ID (11-36)
         blob = partner_row.get("Pubs breakdown per field (partner total)", "")
         if pd.isna(blob) or not str(blob).strip():
             return 0
         vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        # Field IDs start at 11, so index is field_id - 11
         idx = element_id_int - 11
         return vals[idx] if 0 <= idx < len(vals) else 0
     
     elif level == "subfield":
-        # Subfields are in columns like "Pubs per subfield within X (id: Y) (partner total)"
-        # Find the right column based on the parent field
-        # Subfield ID format: XXYY where XX is field_id, YY is position
         parent_field_id = element_id_int // 100
+        col_name = None
+        for col in df_partners_base.columns:
+            if f"(id: {parent_field_id})" in col and "Pubs per subfield" in col and "(partner total)" in col:
+                col_name = col
+                break
         
-        # Find the column for this field
-        col_pattern = f'Pubs per subfield within'
-        matching_cols = [c for c in df_partners_base.columns if col_pattern in c and f"(id: {parent_field_id})" in c and "(partner total)" in c]
-        
-        if not matching_cols:
+        if not col_name:
             return 0
         
-        col = matching_cols[0]
-        blob = partner_row.get(col, "")
+        blob = partner_row.get(col_name, "")
         if pd.isna(blob) or not str(blob).strip():
             return 0
         
         vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        # Position within the field's subfields
-        idx = element_id_int % 100
-        return vals[idx] if 0 <= idx < len(vals) else 0
+        subfields_in_field = get_subfields_for_field(parent_field_id)
+        
+        if element_id_int in subfields_in_field:
+            idx = subfields_in_field.index(element_id_int)
+            return vals[idx] if 0 <= idx < len(vals) else 0
+        return 0
     
     return 0
 
 def render_structure_type_legend():
     """Render legend for structure types."""
-    items = "".join(
-        f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
-        f'<span style="width:14px;height:14px;background:{color};border-radius:3px;margin-right:6px;"></span>'
-        f'{stype.title()}</span>'
-        for stype, color in STRUCTURE_TYPE_COLORS.items()
-    )
+    items = ""
+    for stype, color in STRUCTURE_TYPE_COLORS.items():
+        items += (
+            f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
+            f'<span style="width:14px;height:14px;background:{color};border-radius:3px;margin-right:6px;"></span>'
+            f'{stype.title()}</span>'
+        )
     st.markdown(f'<div style="margin:8px 0 16px 0;">{items}</div>', unsafe_allow_html=True)
+
+def get_research_topic_keywords(topic_id):
+    """Get keywords for a research topic from TM_labels."""
+    if df_tm_labels.empty:
+        return []
+    
+    try:
+        topic_id_int = int(topic_id)
+    except (ValueError, TypeError):
+        return []
+    
+    rt_labels = df_tm_labels[df_tm_labels["dimension"] == "research topic"]
+    matching = rt_labels[rt_labels["topic_id"] == topic_id_int]
+    
+    if matching.empty:
+        return []
+    
+    keywords_str = matching.iloc[0].get("keywords", "")
+    if pd.isna(keywords_str) or not keywords_str:
+        return []
+    
+    # Keywords are pipe-separated with spaces
+    return [kw.strip() for kw in str(keywords_str).split("|") if kw.strip()]
+
+def render_keywords_badges(keywords):
+    """Render keywords as styled badges."""
+    if not keywords:
+        return
+    
+    badges_html = ""
+    for kw in keywords:
+        badges_html += (
+            f'<span style="display:inline-block;background:#e8f4f8;color:#0c5460;'
+            f'padding:4px 12px;margin:4px;border-radius:16px;font-size:0.9em;'
+            f'border:1px solid #bee5eb;">{kw}</span>'
+        )
+    st.markdown(f'<div style="margin:12px 0;">{badges_html}</div>', unsafe_allow_html=True)
 
 # =============================================================================
 # Section 1: Selector
@@ -342,61 +327,59 @@ level_label = LEVEL_LABELS.get(level, level.title())
 # Display element name as header
 st.markdown(f"## {element_name}")
 
+# For research topics, show methodology info and keywords
+if level == "research_topic":
+    st.markdown("""
+    <div style="background:#f8f9fa;padding:12px 16px;border-radius:8px;border-left:4px solid #6c757d;margin-bottom:16px;">
+    <strong>📌 About this topic:</strong> Research topics are identified through a bottom-up approach: 
+    key themes are extracted from publication abstracts using a Large Language Model, 
+    then grouped into coherent clusters using k-means clustering.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    keywords = get_research_topic_keywords(element_id)
+    if keywords:
+        st.markdown("**Keywords:**")
+        render_keywords_badges(keywords)
+
 # =============================================================================
 # Section 2: Topline KPIs
 # =============================================================================
 st.markdown("---")
 
-# Volume & Growth section
 st.markdown("#### 📊 Volume & Growth")
 kpi_cols1 = st.columns(4)
-
 with kpi_cols1[0]:
     st.metric("Publications", f"{int(element_data['pubs_total']):,}")
-
 with kpi_cols1[1]:
     st.metric("% of UL Total", format_pct(element_data['pubs_pct_of_ul']))
-
 with kpi_cols1[2]:
     st.metric("CAGR 2019-23", format_cagr(element_data['cagr_2019_2023']))
 
-# Citation Impact section
 st.markdown("#### 🎯 Citation Impact")
 kpi_cols2 = st.columns(4)
-
 with kpi_cols2[0]:
     fwci_median = element_data['fwci_median']
-    fwci_median_str = f"{fwci_median:.2f}" if pd.notna(fwci_median) else "—"
-    st.metric("Median FWCI", fwci_median_str)
-
+    st.metric("Median FWCI", f"{fwci_median:.2f}" if pd.notna(fwci_median) else "—")
 with kpi_cols2[1]:
     fwci_mean = element_data['fwci_mean']
-    fwci_mean_str = f"{fwci_mean:.2f}" if pd.notna(fwci_mean) else "—"
-    st.metric("Avg. FWCI", fwci_mean_str)
-
+    st.metric("Avg. FWCI", f"{fwci_mean:.2f}" if pd.notna(fwci_mean) else "—")
 with kpi_cols2[2]:
     st.metric("% Top 10%", format_pct(element_data['pct_top10']))
-
 with kpi_cols2[3]:
     st.metric("% Top 1%", format_pct(element_data['pct_top1']))
 
-# Collaborations section
 st.markdown("#### 🤝 Collaborations")
 kpi_cols3 = st.columns(4)
-
 with kpi_cols3[0]:
     st.metric("🌍 % International", format_pct(element_data['pct_international']))
-
 with kpi_cols3[1]:
     st.metric("🏢 % Company", format_pct(element_data['pct_company']))
 
-# Challenge-oriented section
 st.markdown("#### 🌱 Challenge-oriented")
 kpi_cols4 = st.columns(4)
-
 with kpi_cols4[0]:
     st.metric("% SDG-related", format_pct(element_data['pct_sdg']))
-
 with kpi_cols4[1]:
     st.metric("% ISITE", format_pct(element_data['pct_isite']))
 
@@ -414,23 +397,13 @@ if level in ["domain", "field", "subfield"]:
     if not df_sub.empty:
         df_sub = df_sub.sort_values("pubs_total", ascending=False)
         
-        # Add domain info for coloring
-        if level == "domain":
-            df_sub["domain_name"] = element_name
-        elif level == "field":
-            parent_domain_id = field_id2domain.get(int(element_id), 0)
-            df_sub["domain_name"] = domain_id2name.get(parent_domain_id, "Other")
-        else:
-            parent_domain_id = subfield_id2domain.get(int(element_id), 0)
-            df_sub["domain_name"] = domain_id2name.get(parent_domain_id, "Other")
-        
         sub_table = []
         for _, row in df_sub.iterrows():
             sub_table.append({
                 "Name": row["child_name"],
                 "Pubs": int(row["pubs_total"]),
-                f"{level_label} share": row["pubs_pct_of_parent"] * 100,  # Multiply by 100 for progress bar
-                "ISITE contribution": row["pct_isite"] * 100,  # Multiply by 100 for progress bar
+                f"{level_label} share": row["pubs_pct_of_parent"] * 100,
+                "ISITE contribution": row["pct_isite"] * 100,
                 "% Top 10%": format_pct(row["pct_top10"]),
                 "% Top 1%": format_pct(row["pct_top1"]),
                 "% International": format_pct(row["pct_international"]),
@@ -461,12 +434,9 @@ if level in ["domain", "field", "subfield"]:
             }
         )
         
-        # =============================================================================
-        # Section 4: Time Evolution Charts
-        # =============================================================================
+        # Time Evolution Charts
         st.markdown(f"### 📈 Time Evolution of {child_level_label}s")
         
-        # Parse year counts for each sublevel
         time_data = []
         for _, row in df_sub.iterrows():
             year_counts = parse_year_counts(row["pubs_per_year"])
@@ -480,22 +450,18 @@ if level in ["domain", "field", "subfield"]:
         df_time = pd.DataFrame(time_data)
         
         if not df_time.empty:
-            # Get top 10 sublevels by total volume
             top_names = df_sub.nlargest(10, "pubs_total")["child_name"].tolist()
             df_time_top = df_time[df_time["Name"].isin(top_names)]
             
-            # Add "Other" for remaining
             df_time_other = df_time[~df_time["Name"].isin(top_names)].groupby("Year")["Count"].sum().reset_index()
             df_time_other["Name"] = "Other"
             
             df_time_plot = pd.concat([df_time_top, df_time_other], ignore_index=True)
             
-            # Shared color mapping
             all_names = top_names + ["Other"]
             color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set2
             color_map = {name: color_palette[i % len(color_palette)] for i, name in enumerate(all_names)}
             
-            # Absolute values chart
             st.markdown("**Absolute values**")
             fig_abs = px.line(
                 df_time_plot,
@@ -514,7 +480,6 @@ if level in ["domain", "field", "subfield"]:
             )
             st.plotly_chart(fig_abs, use_container_width=True)
             
-            # Stacked area chart
             st.markdown("**Relative share (100% stacked)**")
             df_time_pct = df_time_plot.copy()
             year_totals = df_time_pct.groupby("Year")["Count"].transform("sum")
@@ -548,7 +513,6 @@ st.markdown("### 🏗️ Contribution Analysis")
 contrib_data = get_contribution_data(level, element_id)
 
 if contrib_data is not None:
-    # Top Research Topics (skip for research_topic level)
     if level != "research_topic":
         st.markdown("**Top 5 Research Topics**")
         rt_items = parse_top_items(
@@ -578,7 +542,6 @@ if contrib_data is not None:
         else:
             st.info("No research topic data.")
     
-    # Department Distribution
     st.markdown("**Department Distribution**")
     dept_items = parse_top_items(
         contrib_data.get("department_breakdown", ""),
@@ -610,7 +573,6 @@ if contrib_data is not None:
     else:
         st.info("No department data.")
     
-    # Top 10 Labs / Internal Structures
     st.markdown("**Top 10 Labs / Internal Structures**")
     render_structure_type_legend()
     
@@ -623,13 +585,10 @@ if contrib_data is not None:
         lab_df["count"] = lab_df["count"].apply(safe_int)
         lab_df["pct"] = lab_df["pct"].apply(safe_float)
         
-        # Join with lab info using structure_key (which matches the ROR format)
         def get_lab_name(ror):
-            # Try with ROR: prefix first
             key_with_prefix = f"ROR:{ror}"
             if key_with_prefix in lab_info:
                 return lab_info[key_with_prefix].get("Structure name", ror)
-            # Try without prefix
             if ror in lab_info:
                 return lab_info[ror].get("Structure name", ror)
             return ror
@@ -675,7 +634,6 @@ st.markdown("### 🤝 Top Partners")
 partner_data = get_partner_data(level, element_id)
 
 if partner_data is not None:
-    # International Partners
     st.markdown("**Top 20 International Partners**")
     int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
     int_items = parse_top_items(
@@ -690,7 +648,6 @@ if partner_data is not None:
         
         int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
         int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
-        # Convert to percentage scale for progress bar
         int_display[f"{level_label} share"] = int_display[f"{level_label} share"] * 100
         int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
@@ -710,7 +667,6 @@ if partner_data is not None:
     else:
         st.info("No international partner data.")
     
-    # French Partners
     st.markdown("**Top 20 French Partners**")
     fr_col = [c for c in df_partners.columns if "top_fr_partners" in c][0]
     fr_items = parse_top_items(
@@ -725,7 +681,6 @@ if partner_data is not None:
         
         fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
         fr_display.columns = ["Partner", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
-        # Convert to percentage scale for progress bar
         fr_display[f"{level_label} share"] = fr_display[f"{level_label} share"] * 100
         fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
@@ -762,8 +717,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
     - The **horizontal position** (x-axis) shows the share of the **partner's**
       output in {element_name} that involves UL.
     - The grey **diagonal line** indicates balanced relationships.
-        - Bubbles **to the right** of the diagonal: UL is more important to the partner than vice versa.
-        - Bubbles **to the left** of the diagonal: The partner is more important to UL than vice versa.
     """)
     
     recip_col = [c for c in df_partners.columns if "reciprocity_partners" in c][0]
@@ -776,24 +729,21 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
         recip_df = pd.DataFrame(recip_items)
         recip_df["copubs"] = recip_df["copubs"].apply(safe_int)
         recip_df["share_ul"] = recip_df["share_ul"].apply(safe_float)
-        recip_df["share_partner"] = recip_df["share_partner"].apply(safe_float)
         
-        # Recalculate partner_total from ul_partners_base.parquet
+        # Recalculate partner_total from ul_partners_base
         recip_df["partner_total"] = recip_df["id"].apply(
             lambda pid: get_partner_total_in_theme(pid, level, element_id)
         )
         
-        # Recalculate share_partner based on correct partner_total
+        # Recalculate share_partner
         recip_df["share_partner"] = recip_df.apply(
             lambda row: row["copubs"] / row["partner_total"] if row["partner_total"] > 0 else 0,
             axis=1
         )
         
-        # Filter out rows with zero shares
         recip_df = recip_df[(recip_df["share_ul"] > 0) | (recip_df["share_partner"] > 0)]
         
         if not recip_df.empty:
-            # Slider for number of partners
             max_partners = min(50, len(recip_df))
             n_partners = st.slider(
                 "Number of partners to display:",
@@ -804,7 +754,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
             
             recip_df = recip_df.nlargest(n_partners, "copubs")
             
-            # Geo category for coloring
             def geo_category(country):
                 if country == "France":
                     return "France"
@@ -814,7 +763,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
             
             recip_df["geo"] = recip_df["country"].apply(geo_category)
             
-            # Create scatter plot
             fig_recip = px.scatter(
                 recip_df,
                 x="share_partner",
@@ -844,7 +792,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                 )
             )
             
-            # Add diagonal line
             max_val = max(recip_df["share_ul"].max(), recip_df["share_partner"].max()) * 1.1
             fig_recip.add_shape(
                 type="line",
@@ -869,7 +816,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                 showlegend=False,
             )
             
-            # Custom legend
             st.markdown(
                 """
                 <div style="margin-bottom: 0.5rem;">
@@ -908,14 +854,16 @@ if author_data is not None:
         auth_df["pubs"] = auth_df["pubs"].apply(safe_int)
         auth_df["pct"] = auth_df["pct"].apply(safe_float)
         auth_df["fwci"] = auth_df["fwci"].apply(safe_float)
-        auth_df["is_lorraine"] = auth_df["is_lorraine"].apply(lambda x: x.lower() == "true" if isinstance(x, str) else bool(x))
-        # Fix compressed names
+        auth_df["is_lorraine"] = auth_df["is_lorraine"].apply(lambda x: str(x).lower() == "true")
         auth_df["name"] = auth_df["name"].apply(add_spaces_to_name)
         
+        fwci_col_name = f"Avg. FWCI in {level_label}"
+        share_col_name = f"{level_label} share"
+        
         auth_display = auth_df[["name", "orcid", "pubs", "pct", "fwci", "is_lorraine", "labs"]].copy()
-        auth_display.columns = ["Author", "ORCID", "Pubs", f"{level_label} share", "Avg. FWCI in {level_label}", "UL Affiliation", "Labs"]
-        auth_display[f"{level_label} share"] = auth_display[f"{level_label} share"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
-        auth_display[f"Avg. FWCI in {level_label}"] = auth_display[f"Avg. FWCI in {level_label}"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
+        auth_display.columns = ["Author", "ORCID", "Pubs", share_col_name, fwci_col_name, "UL Affiliation", "Labs"]
+        auth_display[share_col_name] = auth_display[share_col_name].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        auth_display[fwci_col_name] = auth_display[fwci_col_name].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         auth_display["UL Affiliation"] = auth_display["UL Affiliation"].apply(lambda x: "✅" if x else "")
         auth_display["Labs"] = auth_display["Labs"].apply(lambda x: x.replace("/", " | ") if x else "")
         
