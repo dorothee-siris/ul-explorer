@@ -427,7 +427,12 @@ if level in ["domain", "field", "subfield"]:
             fig_abs.update_layout(
                 height=400,
                 margin=dict(t=30, l=50, r=30, b=50),
-                xaxis=dict(dtick=1),
+                xaxis=dict(
+                    dtick=1,
+                    showgrid=True,
+                    gridcolor="lightgrey",
+                    gridwidth=0.5,
+                ),
                 yaxis_title="Publications",
                 legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
             )
@@ -436,26 +441,32 @@ if level in ["domain", "field", "subfield"]:
             st.markdown("**Relative share (100% stacked)**")
             df_time_pct = df_time_plot.copy()
             year_totals = df_time_pct.groupby("Year")["Count"].transform("sum")
-            df_time_pct["Percentage"] = (df_time_pct["Count"] / year_totals * 100).fillna(0)
+            df_time_pct["Share"] = (df_time_pct["Count"] / year_totals * 100).fillna(0)
             
             fig_stack = px.area(
                 df_time_pct,
                 x="Year",
-                y="Percentage",
+                y="Share",
                 color="Name",
                 color_discrete_map=color_map,
                 groupnorm="percent",
             )
+            fig_stack.update_traces(
+                hovertemplate="Year=%{x}<br>Share=%{y:.2f}%<extra>%{fullData.name}</extra>"
+            )
             fig_stack.update_layout(
                 height=400,
                 margin=dict(t=30, l=50, r=30, b=50),
-                xaxis=dict(dtick=1),
+                xaxis=dict(
+                    dtick=1,
+                    showgrid=True,
+                    gridcolor="lightgrey",
+                    gridwidth=0.5,
+                ),
                 yaxis=dict(title="Share (%)", range=[0, 100]),
                 legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
             )
             st.plotly_chart(fig_stack, use_container_width=True)
-    else:
-        st.info("No sublevel data available.")
 
 # =============================================================================
 # Section 5: Contribution Analysis
@@ -467,7 +478,7 @@ contrib_data = get_contribution_data(level, element_id)
 
 if contrib_data is not None:
     if level != "research_topic":
-        st.markdown("**Top 5 Research Topics**")
+        st.markdown("**Top 10 contributing Research Topics**")
         # Find the actual column name (may include format description)
         rt_col = find_column(contrib_data, "top_research_topics")
         rt_items = []
@@ -499,7 +510,7 @@ if contrib_data is not None:
         else:
             st.info("No research topic data.")
     
-    st.markdown("**Department Distribution**")
+    st.markdown("**Contributing departments**")
     dept_col = find_column(contrib_data, "department_breakdown")
     dept_items = []
     if dept_col:
@@ -533,7 +544,7 @@ if contrib_data is not None:
     else:
         st.info("No department data.")
     
-    st.markdown("**Top 10 Labs / Internal Structures**")
+    st.markdown("**Top 10 contributing labs / internal structures**")
     render_structure_type_legend()
     
     lab_col = find_column(contrib_data, "top_labs")
@@ -668,8 +679,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
     """)
     
     recip_col = [c for c in df_partners.columns if "reciprocity_partners" in c][0]
-    # FIXED: Format is id:name:country:type:copubs:share_ul:share_partner:partner_total (8 fields)
-    # All data is already pre-computed in the parquet file!
     recip_items = parse_top_items(
         partner_data.get(recip_col, ""),
         ["id", "name", "country", "type", "copubs", "share_ul", "share_partner", "partner_total"]
@@ -685,6 +694,15 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
         # Filter out rows with no meaningful data
         recip_df = recip_df[(recip_df["share_ul"] > 0) | (recip_df["share_partner"] > 0)]
         recip_df = recip_df[recip_df["partner_total"] > 0]
+        
+        # Outlier toggle
+        remove_outliers = st.checkbox(
+            "Remove outliers (partner share > 100%)",
+            value=False,
+            help="Some partners may show >100% share due to data artifacts. Toggle to exclude them."
+        )
+        if remove_outliers:
+            recip_df = recip_df[(recip_df["share_partner"] <= 1.0) & (recip_df["share_ul"] <= 1.0)]
         
         if not recip_df.empty:
             max_partners = min(50, len(recip_df))
