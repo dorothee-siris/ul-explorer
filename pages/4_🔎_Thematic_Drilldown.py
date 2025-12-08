@@ -597,20 +597,30 @@ partner_data = get_partner_data(level, element_id)
 if partner_data is not None:
     st.markdown("**Top 20 International Partners**")
     int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
-    # Format: id:name:country:type:copubs:pct:fwci (7 fields)
+    # Format: id:name:country:type:copubs:share_ul:share_int:share_partner:fwci (9 fields)
     int_items = parse_top_items(
         partner_data.get(int_col, ""),
-        ["id", "name", "country", "type", "copubs", "pct", "fwci"]
+        ["id", "name", "country", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]
     )
     if int_items:
         int_df = pd.DataFrame(int_items)
         int_df["copubs"] = int_df["copubs"].apply(safe_int)
-        int_df["pct"] = int_df["pct"].apply(safe_float)
+        int_df["share_ul"] = int_df["share_ul"].apply(safe_float)
+        int_df["share_int"] = int_df["share_int"].apply(safe_float)
+        int_df["share_partner"] = int_df["share_partner"].apply(safe_float)
         int_df["fwci"] = int_df["fwci"].apply(safe_float)
         
-        int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
-        int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
-        int_display[f"{level_label} share"] = int_display[f"{level_label} share"] * 100
+        int_display = int_df[["name", "country", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]].copy()
+        int_display.columns = [
+            "Partner", "Country", "Type", "Co-pubs",
+            f"% of UL's {level_label}",
+            "% of collab.",
+            f"% of partner's {level_label}",
+            "Avg FWCI"
+        ]
+        int_display[f"% of UL's {level_label}"] = int_display[f"% of UL's {level_label}"] * 100
+        int_display["% of collab."] = int_display["% of collab."] * 100
+        int_display[f"% of partner's {level_label}"] = int_display[f"% of partner's {level_label}"] * 100
         int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
         st.dataframe(
@@ -618,8 +628,21 @@ if partner_data is not None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                f"{level_label} share": st.column_config.ProgressColumn(
-                    f"{level_label} share",
+                f"% of UL's {level_label}": st.column_config.ProgressColumn(
+                    f"% of UL's {level_label}",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+                "% of collab.": st.column_config.ProgressColumn(
+                    "% of collab.",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                    help="Share of all UL co-publications with this partner",
+                ),
+                f"% of partner's {level_label}": st.column_config.ProgressColumn(
+                    f"% of partner's {level_label}",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
@@ -631,19 +654,30 @@ if partner_data is not None:
     
     st.markdown("**Top 20 French Partners**")
     fr_col = [c for c in df_partners.columns if "top_fr_partners" in c][0]
+    # Format: id:name:type:copubs:share_level:share_int:share_partner:fwci (8 fields, no country)
     fr_items = parse_top_items(
         partner_data.get(fr_col, ""),
-        ["id", "name", "country", "type", "copubs", "pct", "fwci"]
+        ["id", "name", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]
     )
     if fr_items:
         fr_df = pd.DataFrame(fr_items)
         fr_df["copubs"] = fr_df["copubs"].apply(safe_int)
-        fr_df["pct"] = fr_df["pct"].apply(safe_float)
+        fr_df["share_ul"] = fr_df["share_ul"].apply(safe_float)
+        fr_df["share_int"] = fr_df["share_int"].apply(safe_float)
+        fr_df["share_partner"] = fr_df["share_partner"].apply(safe_float)
         fr_df["fwci"] = fr_df["fwci"].apply(safe_float)
         
-        fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
-        fr_display.columns = ["Partner", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
-        fr_display[f"{level_label} share"] = fr_display[f"{level_label} share"] * 100
+        fr_display = fr_df[["name", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]].copy()
+        fr_display.columns = [
+            "Partner", "Type", "Co-pubs",
+            f"% of UL's {level_label}",
+            "% of collab.",
+            f"% of partner's {level_label}",
+            "Avg FWCI"
+        ]
+        fr_display[f"% of UL's {level_label}"] = fr_display[f"% of UL's {level_label}"] * 100
+        fr_display["% of collab."] = fr_display["% of collab."] * 100
+        fr_display[f"% of partner's {level_label}"] = fr_display[f"% of partner's {level_label}"] * 100
         fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
         st.dataframe(
@@ -651,8 +685,21 @@ if partner_data is not None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                f"{level_label} share": st.column_config.ProgressColumn(
-                    f"{level_label} share",
+                f"% of UL's {level_label}": st.column_config.ProgressColumn(
+                    f"% of UL's {level_label}",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+                "% of collab.": st.column_config.ProgressColumn(
+                    "% of collab.",
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                    help="Share of all UL co-publications with this partner",
+                ),
+                f"% of partner's {level_label}": st.column_config.ProgressColumn(
+                    f"% of partner's {level_label}",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
@@ -682,17 +729,20 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
     """)
     
     recip_col = [c for c in df_partners.columns if "reciprocity_partners" in c][0]
+    # Format: id:name:country:type:copubs:share_ul:share_int:share_partner:partner_total:fwci (10 fields)
     recip_items = parse_top_items(
         partner_data.get(recip_col, ""),
-        ["id", "name", "country", "type", "copubs", "share_ul", "share_partner", "partner_total"]
+        ["id", "name", "country", "type", "copubs", "share_ul", "share_int", "share_partner", "partner_total", "fwci"]
     )
     
     if recip_items:
         recip_df = pd.DataFrame(recip_items)
         recip_df["copubs"] = recip_df["copubs"].apply(safe_int)
         recip_df["share_ul"] = recip_df["share_ul"].apply(safe_float)
+        recip_df["share_int"] = recip_df["share_int"].apply(safe_float)
         recip_df["share_partner"] = recip_df["share_partner"].apply(safe_float)
         recip_df["partner_total"] = recip_df["partner_total"].apply(safe_int)
+        recip_df["fwci"] = recip_df["fwci"].apply(safe_float)
         
         # Filter out rows with no meaningful data
         recip_df = recip_df[(recip_df["share_ul"] > 0) | (recip_df["share_partner"] > 0)]
@@ -740,7 +790,7 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                     "No country": "#888888",
                 },
                 hover_name="name",
-                custom_data=["country", "type", "copubs", "share_ul", "share_partner", "partner_total"],
+                custom_data=["country", "type", "copubs", "share_ul", "share_int", "share_partner", "partner_total", "fwci"],
             )
             
             fig_recip.update_traces(
@@ -750,9 +800,11 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                     "Country: %{customdata[0]}<br>"
                     "Type: %{customdata[1]}<br>"
                     "Co-publications: %{customdata[2]:,}<br>"
-                    f"Share of UL's {element_name}: " + "%{customdata[3]:.1%}<br>"
-                    f"Share of partner's {element_name}: " + "%{customdata[4]:.1%}<br>"
-                    f"Partner's total in {element_name}: " + "%{customdata[5]:,}<extra></extra>"
+                    f"% of UL's {element_name}: " + "%{customdata[3]:.1%}<br>"
+                    "% of collaboration: %{customdata[4]:.1%}<br>"
+                    f"% of partner's {element_name}: " + "%{customdata[5]:.1%}<br>"
+                    f"Partner's total in {element_name}: " + "%{customdata[6]:,}<br>"
+                    "Avg FWCI: %{customdata[7]:.2f}<extra></extra>"
                 )
             )
             
