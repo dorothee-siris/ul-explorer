@@ -501,11 +501,14 @@ if contrib_data is not None:
                 textposition="auto",
             ))
             fig_rt.update_layout(
-                height=600,
+                height=450,
                 margin=dict(t=10, l=10, r=10, b=10),
                 xaxis_title="Publications",
                 yaxis_title="",
             )
+
+            fig_rt.update_yaxes(tickfont_size=10)
+
             st.plotly_chart(fig_rt, use_container_width=True)
         else:
             st.info("No research topic data.")
