@@ -45,3 +45,52 @@ def get_core_df() -> pd.DataFrame:
 def get_lookup_df() -> pd.DataFrame:
     """Lookup table if needed."""
     return pd.read_parquet(DATA_DIR / "ul_lookup.parquet")
+
+
+@st.cache_data
+def load_thematic_overview():
+    return pd.read_parquet("data/thematic_overview.parquet")
+
+@st.cache_data
+def load_thematic_sublevels():
+    return pd.read_parquet("data/thematic_detail_sublevels.parquet")
+
+@st.cache_data
+def load_thematic_contributions():
+    return pd.read_parquet("data/thematic_detail_contributions.parquet")
+
+@st.cache_data
+def load_thematic_partners():
+    return pd.read_parquet("data/thematic_detail_partners.parquet")
+
+@st.cache_data
+def load_thematic_authors():
+    return pd.read_parquet("data/thematic_detail_authors.parquet")
+
+@st.cache_data
+def load_lab_info():
+    """Load lab names and types from structures file."""
+    try:
+        df = pd.read_parquet("data/ul_labs.parquet")
+        # Index by structure_key (which is the ROR in the contributions file)
+        return df.set_index("structure_key")[["Structure name", "Structure type"]].to_dict("index")
+    except Exception as e:
+        st.warning(f"Could not load lab info: {e}")
+        return {}
+
+@st.cache_data
+def load_partners_base():
+    """Load partner base data for reciprocity calculations."""
+    try:
+        return pd.read_parquet("data/ul_partners_base.parquet")
+    except Exception as e:
+        st.warning(f"Could not load partners base: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def load_tm_labels():
+    """Load topic model labels and keywords."""
+    try:
+        return pd.read_parquet("data/TM_labels.parquet")
+    except Exception as e:
+        return pd.DataFrame()

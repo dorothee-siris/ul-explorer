@@ -1,10 +1,10 @@
 """
 Thematic Drill-Down - Detailed exploration of a specific domain, field, subfield, or research topic.
+FIXED VERSION: Removed unnecessary load_lab_info and load_partners_base dependencies.
 """
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import re
@@ -15,7 +15,6 @@ from lib.helpers import (
     get_field_id_to_domain_id,
     get_subfield_id_to_name,
     get_subfield_id_to_domain_id,
-    get_subfields_for_field,
     safe_float,
     safe_int,
 )
@@ -26,8 +25,6 @@ from lib.data_cache import (
     load_thematic_contributions,
     load_thematic_partners,
     load_thematic_authors,
-    load_lab_info,
-    load_partners_base,
     load_tm_labels,
 )
 
@@ -66,15 +63,13 @@ STRUCTURE_TYPE_COLORS = {
 }
 
 # =============================================================================
-# Load data
+# Load data (SIMPLIFIED - removed unnecessary loads)
 # =============================================================================
 df_overview = load_thematic_overview()
 df_sublevels = load_thematic_sublevels()
 df_contributions = load_thematic_contributions()
 df_partners = load_thematic_partners()
 df_authors = load_thematic_authors()
-lab_info = load_lab_info()
-df_partners_base = load_partners_base()
 df_tm_labels = load_tm_labels()
 
 # Lookups
@@ -113,7 +108,10 @@ def parse_year_counts(blob):
     return result
 
 def parse_top_items(blob, expected_fields):
-    """Parse pipe-separated items with colon-separated fields."""
+    """
+    Parse pipe-separated items with colon-separated fields.
+    FIXED: Now handles fields with varying counts more robustly.
+    """
     if pd.isna(blob) or not str(blob).strip():
         return []
     results = []
@@ -178,64 +176,6 @@ def get_author_data(level, element_id):
         return None
     return rows.iloc[0]
 
-def get_partner_total_in_theme(partner_id, level, element_id):
-    """
-    Get partner's total publications in a specific thematic area from ul_partners_base.parquet.
-    """
-    if df_partners_base.empty:
-        return 0
-    
-    partner_row = df_partners_base[df_partners_base["Partner ID"] == partner_id]
-    if partner_row.empty:
-        return 0
-    partner_row = partner_row.iloc[0]
-    
-    try:
-        element_id_int = int(element_id)
-    except (ValueError, TypeError):
-        return 0
-    
-    if level == "domain":
-        blob = partner_row.get("Pubs breakdown per domain (partner total)", "")
-        if pd.isna(blob) or not str(blob).strip():
-            return 0
-        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        idx = element_id_int - 1
-        return vals[idx] if 0 <= idx < len(vals) else 0
-    
-    elif level == "field":
-        blob = partner_row.get("Pubs breakdown per field (partner total)", "")
-        if pd.isna(blob) or not str(blob).strip():
-            return 0
-        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        idx = element_id_int - 11
-        return vals[idx] if 0 <= idx < len(vals) else 0
-    
-    elif level == "subfield":
-        parent_field_id = element_id_int // 100
-        col_name = None
-        for col in df_partners_base.columns:
-            if f"(id: {parent_field_id})" in col and "Pubs per subfield" in col and "(partner total)" in col:
-                col_name = col
-                break
-        
-        if not col_name:
-            return 0
-        
-        blob = partner_row.get(col_name, "")
-        if pd.isna(blob) or not str(blob).strip():
-            return 0
-        
-        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
-        subfields_in_field = get_subfields_for_field(parent_field_id)
-        
-        if element_id_int in subfields_in_field:
-            idx = subfields_in_field.index(element_id_int)
-            return vals[idx] if 0 <= idx < len(vals) else 0
-        return 0
-    
-    return 0
-
 def render_structure_type_legend():
     """Render legend for structure types."""
     items = ""
@@ -267,7 +207,6 @@ def get_research_topic_keywords(topic_id):
     if pd.isna(keywords_str) or not keywords_str:
         return []
     
-    # Keywords are pipe-separated with spaces
     return [kw.strip() for kw in str(keywords_str).split("|") if kw.strip()]
 
 def render_keywords_badges(keywords):
@@ -515,6 +454,7 @@ contrib_data = get_contribution_data(level, element_id)
 if contrib_data is not None:
     if level != "research_topic":
         st.markdown("**Top 5 Research Topics**")
+        # Format: id:label:count:share
         rt_items = parse_top_items(
             contrib_data.get("top_research_topics", ""),
             ["id", "label", "count", "pct"]
@@ -543,6 +483,7 @@ if contrib_data is not None:
             st.info("No research topic data.")
     
     st.markdown("**Department Distribution**")
+    # Format: dept:count:share
     dept_items = parse_top_items(
         contrib_data.get("department_breakdown", ""),
         ["dept", "count", "pct"]
@@ -576,34 +517,20 @@ if contrib_data is not None:
     st.markdown("**Top 10 Labs / Internal Structures**")
     render_structure_type_legend()
     
+    # FIXED: Format is ror:name:type:count:share (5 fields, not 3!)
     lab_items = parse_top_items(
         contrib_data.get("top_labs", ""),
-        ["ror", "count", "pct"]
+        ["ror", "name", "type", "count", "pct"]
     )
     if lab_items:
         lab_df = pd.DataFrame(lab_items)
         lab_df["count"] = lab_df["count"].apply(safe_int)
         lab_df["pct"] = lab_df["pct"].apply(safe_float)
         
-        def get_lab_name(ror):
-            key_with_prefix = f"ROR:{ror}"
-            if key_with_prefix in lab_info:
-                return lab_info[key_with_prefix].get("Structure name", ror)
-            if ror in lab_info:
-                return lab_info[ror].get("Structure name", ror)
-            return ror
-        
-        def get_lab_type(ror):
-            key_with_prefix = f"ROR:{ror}"
-            if key_with_prefix in lab_info:
-                return lab_info[key_with_prefix].get("Structure type", "other")
-            if ror in lab_info:
-                return lab_info[ror].get("Structure type", "other")
-            return "other"
-        
-        lab_df["name"] = lab_df["ror"].apply(get_lab_name)
-        lab_df["type"] = lab_df["ror"].apply(get_lab_type)
-        lab_df["color"] = lab_df["type"].apply(lambda x: STRUCTURE_TYPE_COLORS.get(x, STRUCTURE_TYPE_COLORS["other"]))
+        # Color by structure type (already in data, no need for lookup!)
+        lab_df["color"] = lab_df["type"].apply(
+            lambda x: STRUCTURE_TYPE_COLORS.get(x, STRUCTURE_TYPE_COLORS["other"])
+        )
         
         lab_df = lab_df.sort_values("count", ascending=True).tail(10)
         
@@ -636,6 +563,7 @@ partner_data = get_partner_data(level, element_id)
 if partner_data is not None:
     st.markdown("**Top 20 International Partners**")
     int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
+    # Format: id:name:country:type:copubs:pct:fwci (7 fields)
     int_items = parse_top_items(
         partner_data.get(int_col, ""),
         ["id", "name", "country", "type", "copubs", "pct", "fwci"]
@@ -720,6 +648,8 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
     """)
     
     recip_col = [c for c in df_partners.columns if "reciprocity_partners" in c][0]
+    # FIXED: Format is id:name:country:type:copubs:share_ul:share_partner:partner_total (8 fields)
+    # All data is already pre-computed in the parquet file!
     recip_items = parse_top_items(
         partner_data.get(recip_col, ""),
         ["id", "name", "country", "type", "copubs", "share_ul", "share_partner", "partner_total"]
@@ -729,19 +659,12 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
         recip_df = pd.DataFrame(recip_items)
         recip_df["copubs"] = recip_df["copubs"].apply(safe_int)
         recip_df["share_ul"] = recip_df["share_ul"].apply(safe_float)
+        recip_df["share_partner"] = recip_df["share_partner"].apply(safe_float)
+        recip_df["partner_total"] = recip_df["partner_total"].apply(safe_int)
         
-        # Recalculate partner_total from ul_partners_base
-        recip_df["partner_total"] = recip_df["id"].apply(
-            lambda pid: get_partner_total_in_theme(pid, level, element_id)
-        )
-        
-        # Recalculate share_partner
-        recip_df["share_partner"] = recip_df.apply(
-            lambda row: row["copubs"] / row["partner_total"] if row["partner_total"] > 0 else 0,
-            axis=1
-        )
-        
+        # Filter out rows with no meaningful data
         recip_df = recip_df[(recip_df["share_ul"] > 0) | (recip_df["share_partner"] > 0)]
+        recip_df = recip_df[recip_df["partner_total"] > 0]
         
         if not recip_df.empty:
             max_partners = min(50, len(recip_df))

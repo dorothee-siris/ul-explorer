@@ -81,7 +81,7 @@ def safe_float(val: Any) -> float:
 # ============================================================================
 # TAXONOMY LOOKUPS
 # ============================================================================
-
+from lib.data_cache import get_topics_df
 _TAXONOMY_CACHE: Dict[str, Any] = {}
 
 
@@ -91,7 +91,6 @@ def _ensure_taxonomy_loaded(topics_df: pd.DataFrame | None = None) -> pd.DataFra
         if topics_df is not None:
             _TAXONOMY_CACHE["df"] = topics_df
         else:
-            from lib.data_cache import get_topics_df
             _TAXONOMY_CACHE["df"] = get_topics_df()
     return _TAXONOMY_CACHE["df"]
 
