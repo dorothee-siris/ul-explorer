@@ -47,6 +47,28 @@ st.title("🔎 Thematic Drill-Down")
 st.markdown("Explore detailed metrics for a specific domain, field, subfield, or research topic.")
 
 # =============================================================================
+# Constants
+# =============================================================================
+LEVEL_LABELS = {
+    "domain": "Domain",
+    "field": "Field",
+    "subfield": "Subfield",
+    "research_topic": "Research Topic",
+}
+
+CHILD_LEVEL_LABELS = {
+    "domain": "Field",
+    "field": "Subfield",
+    "subfield": "Topic",
+}
+
+STRUCTURE_TYPE_COLORS = {
+    "lab": "#4e79a7",
+    "facility": "#f28e2b",
+    "other": "#76b7b2",
+}
+
+# =============================================================================
 # Load data
 # =============================================================================
 @st.cache_data
@@ -70,11 +92,11 @@ def load_thematic_authors():
     return pd.read_parquet("data/thematic_detail_authors.parquet")
 
 @st.cache_data
-def load_lab_lookup():
-    """Load lab names from structures file if available."""
+def load_lab_info():
+    """Load lab names and types from structures file."""
     try:
-        df = pd.read_parquet("data/ul_structures_base.parquet")
-        return df.set_index("structure_key")["Structure name"].to_dict()
+        df = pd.read_parquet("data/ul_labs.parquet")
+        return df.set_index("structure_key")[["Structure name", "Structure type"]].to_dict("index")
     except:
         return {}
 
@@ -83,7 +105,7 @@ df_sublevels = load_thematic_sublevels()
 df_contributions = load_thematic_contributions()
 df_partners = load_thematic_partners()
 df_authors = load_thematic_authors()
-lab_names = load_lab_lookup()
+lab_info = load_lab_info()
 
 # Lookups
 domain_id2name = get_domain_id_to_name()
@@ -121,10 +143,7 @@ def parse_year_counts(blob):
     return result
 
 def parse_top_items(blob, expected_fields):
-    """
-    Parse pipe-separated items with colon-separated fields.
-    Returns list of dicts.
-    """
+    """Parse pipe-separated items with colon-separated fields."""
     if pd.isna(blob) or not str(blob).strip():
         return []
     results = []
@@ -182,6 +201,16 @@ def get_author_data(level, element_id):
         return None
     return rows.iloc[0]
 
+def render_structure_type_legend():
+    """Render legend for structure types."""
+    items = "".join(
+        f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
+        f'<span style="width:14px;height:14px;background:{color};border-radius:3px;margin-right:6px;"></span>'
+        f'{stype.title()}</span>'
+        for stype, color in STRUCTURE_TYPE_COLORS.items()
+    )
+    st.markdown(f'<div style="margin:8px 0 16px 0;">{items}</div>', unsafe_allow_html=True)
+
 # =============================================================================
 # Section 1: Selector
 # =============================================================================
@@ -219,8 +248,11 @@ if element_data is None:
     st.error("Element data not found.")
     st.stop()
 
+element_name = element_data['name']
+level_label = LEVEL_LABELS.get(level, level.title())
+
 # Display element name as header
-st.markdown(f"## {element_data['name']}")
+st.markdown(f"## {element_name}")
 if level != "research_topic":
     render_domain_legend()
 
@@ -229,42 +261,54 @@ if level != "research_topic":
 # =============================================================================
 st.markdown("---")
 
-kpi_cols = st.columns(6)
+# Volume & Growth section
+st.markdown("#### 📊 Volume & Growth")
+kpi_cols1 = st.columns(4)
 
-with kpi_cols[0]:
+with kpi_cols1[0]:
     st.metric("Publications", f"{int(element_data['pubs_total']):,}")
 
-with kpi_cols[1]:
+with kpi_cols1[1]:
     st.metric("% of UL Total", format_pct(element_data['pubs_pct_of_ul']))
 
-with kpi_cols[2]:
-    st.metric("% International", format_pct(element_data['pct_international']))
-
-with kpi_cols[3]:
-    st.metric("% ISITE", format_pct(element_data['pct_isite']))
-
-with kpi_cols[4]:
-    fwci = element_data['fwci_median']
-    fwci_str = f"{fwci:.2f}" if pd.notna(fwci) else "—"
-    st.metric("Median FWCI", fwci_str)
-
-with kpi_cols[5]:
+with kpi_cols1[2]:
     st.metric("CAGR 2019-23", format_cagr(element_data['cagr_2019_2023']))
 
-# Second row of KPIs
-kpi_cols2 = st.columns(6)
+with kpi_cols1[3]:
+    st.metric("% SDG-related", format_pct(element_data['pct_sdg']))
+
+# Impact section
+st.markdown("#### 🎯 Impact & Excellence")
+kpi_cols2 = st.columns(4)
 
 with kpi_cols2[0]:
-    st.metric("% Top 10%", format_pct(element_data['pct_top10']))
+    fwci_median = element_data['fwci_median']
+    fwci_median_str = f"{fwci_median:.2f}" if pd.notna(fwci_median) else "—"
+    st.metric("Median FWCI", fwci_median_str)
 
 with kpi_cols2[1]:
-    st.metric("% Top 1%", format_pct(element_data['pct_top1']))
+    fwci_mean = element_data['fwci_mean']
+    fwci_mean_str = f"{fwci_mean:.2f}" if pd.notna(fwci_mean) else "—"
+    st.metric("Avg. FWCI", fwci_mean_str)
 
 with kpi_cols2[2]:
-    st.metric("% Company", format_pct(element_data['pct_company']))
+    st.metric("% Top 10%", format_pct(element_data['pct_top10']))
 
 with kpi_cols2[3]:
-    st.metric("% SDG", format_pct(element_data['pct_sdg']))
+    st.metric("% Top 1%", format_pct(element_data['pct_top1']))
+
+# Collaboration & Funding section
+st.markdown("#### 🤝 Collaboration & Funding")
+kpi_cols3 = st.columns(4)
+
+with kpi_cols3[0]:
+    st.metric("🌍 % International", format_pct(element_data['pct_international']))
+
+with kpi_cols3[1]:
+    st.metric("🏢 % Company", format_pct(element_data['pct_company']))
+
+with kpi_cols3[2]:
+    st.metric("% ISITE", format_pct(element_data['pct_isite']))
 
 # =============================================================================
 # Section 3: Sublevel Breakdown (for OA taxonomy only)
@@ -272,8 +316,8 @@ with kpi_cols2[3]:
 if level in ["domain", "field", "subfield"]:
     st.markdown("---")
     
-    child_level_name = {"domain": "Fields", "field": "Subfields", "subfield": "Topics"}.get(level)
-    st.markdown(f"### 📊 {child_level_name} within this {level.title()}")
+    child_level_label = CHILD_LEVEL_LABELS.get(level, "Sub-element")
+    st.markdown(f"### 📊 {child_level_label} mix within {element_name}")
     
     df_sub = get_sublevel_data(level, element_id)
     
@@ -282,14 +326,11 @@ if level in ["domain", "field", "subfield"]:
         
         # Add domain info for coloring
         if level == "domain":
-            # Children are fields
-            df_sub["domain_name"] = element_data["name"]
+            df_sub["domain_name"] = element_name
         elif level == "field":
-            # Children are subfields, inherit domain from parent field
             parent_domain_id = field_id2domain.get(int(element_id), 0)
             df_sub["domain_name"] = domain_id2name.get(parent_domain_id, "Other")
         else:
-            # Children are topics, get domain from subfield
             parent_domain_id = subfield_id2domain.get(int(element_id), 0)
             df_sub["domain_name"] = domain_id2name.get(parent_domain_id, "Other")
         
@@ -298,12 +339,13 @@ if level in ["domain", "field", "subfield"]:
             sub_table.append({
                 "Name": row["child_name"],
                 "Pubs": int(row["pubs_total"]),
-                "% of Parent": row["pubs_pct_of_parent"],
+                f"% of {level_label}": row["pubs_pct_of_parent"],
                 "% ISITE": row["pct_isite"],
                 "% Top 10%": format_pct(row["pct_top10"]),
                 "% Top 1%": format_pct(row["pct_top1"]),
                 "% Int'l": format_pct(row["pct_international"]),
-                "FWCI": f"{row['fwci_median']:.2f}" if pd.notna(row['fwci_median']) else "—",
+                "Median FWCI": f"{row['fwci_median']:.2f}" if pd.notna(row['fwci_median']) else "—",
+                "Avg. FWCI": f"{row['fwci_mean']:.2f}" if pd.notna(row['fwci_mean']) else "—",
                 "CAGR": format_cagr(row["cagr_2019_2023"]),
             })
         
@@ -314,8 +356,8 @@ if level in ["domain", "field", "subfield"]:
             hide_index=True,
             height=min(400, 35 + len(sub_table) * 35),
             column_config={
-                "% of Parent": st.column_config.ProgressColumn(
-                    "% of Parent",
+                f"% of {level_label}": st.column_config.ProgressColumn(
+                    f"% of {level_label}",
                     min_value=0,
                     max_value=1,
                     format="%.1f%%",
@@ -332,7 +374,7 @@ if level in ["domain", "field", "subfield"]:
         # =============================================================================
         # Section 4: Time Evolution Charts
         # =============================================================================
-        st.markdown(f"### 📈 Time Evolution of {child_level_name}")
+        st.markdown(f"### 📈 Time Evolution of {child_level_label}s")
         
         # Parse year counts for each sublevel
         time_data = []
@@ -358,47 +400,60 @@ if level in ["domain", "field", "subfield"]:
             
             df_time_plot = pd.concat([df_time_top, df_time_other], ignore_index=True)
             
-            col1, col2 = st.columns(2)
+            # Shared color mapping
+            all_names = top_names + ["Other"]
+            color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Set2
+            color_map = {name: color_palette[i % len(color_palette)] for i, name in enumerate(all_names)}
             
-            with col1:
-                st.markdown("**Absolute values**")
-                fig_abs = px.line(
-                    df_time_plot,
-                    x="Year",
-                    y="Count",
-                    color="Name",
-                    markers=True,
-                )
-                fig_abs.update_layout(
-                    height=350,
-                    margin=dict(t=30, l=50, r=30, b=50),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.4),
-                    xaxis=dict(dtick=1),
-                )
-                st.plotly_chart(fig_abs, use_container_width=True)
+            # Legend (shared)
+            st.markdown("**Legend:**")
+            legend_items = " · ".join([
+                f'<span style="color:{color_map[name]}">●</span> {name}'
+                for name in all_names if name in df_time_plot["Name"].unique()
+            ])
+            st.markdown(f'<div style="margin-bottom:16px;font-size:0.9em;">{legend_items}</div>', unsafe_allow_html=True)
             
-            with col2:
-                st.markdown("**Relative share (100% stacked)**")
-                # Calculate percentages per year
-                df_time_pct = df_time_plot.copy()
-                year_totals = df_time_pct.groupby("Year")["Count"].transform("sum")
-                df_time_pct["Percentage"] = (df_time_pct["Count"] / year_totals * 100).fillna(0)
-                
-                fig_stack = px.area(
-                    df_time_pct,
-                    x="Year",
-                    y="Percentage",
-                    color="Name",
-                    groupnorm="percent",
-                )
-                fig_stack.update_layout(
-                    height=350,
-                    margin=dict(t=30, l=50, r=30, b=50),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.4),
-                    xaxis=dict(dtick=1),
-                    yaxis=dict(title="Share (%)", range=[0, 100]),
-                )
-                st.plotly_chart(fig_stack, use_container_width=True)
+            # Absolute values chart
+            st.markdown("**Absolute values**")
+            fig_abs = px.line(
+                df_time_plot,
+                x="Year",
+                y="Count",
+                color="Name",
+                color_discrete_map=color_map,
+                markers=True,
+            )
+            fig_abs.update_layout(
+                height=400,
+                margin=dict(t=30, l=50, r=30, b=50),
+                showlegend=False,
+                xaxis=dict(dtick=1),
+                yaxis_title="Publications",
+            )
+            st.plotly_chart(fig_abs, use_container_width=True)
+            
+            # Stacked area chart
+            st.markdown("**Relative share (100% stacked)**")
+            df_time_pct = df_time_plot.copy()
+            year_totals = df_time_pct.groupby("Year")["Count"].transform("sum")
+            df_time_pct["Percentage"] = (df_time_pct["Count"] / year_totals * 100).fillna(0)
+            
+            fig_stack = px.area(
+                df_time_pct,
+                x="Year",
+                y="Percentage",
+                color="Name",
+                color_discrete_map=color_map,
+                groupnorm="percent",
+            )
+            fig_stack.update_layout(
+                height=400,
+                margin=dict(t=30, l=50, r=30, b=50),
+                showlegend=False,
+                xaxis=dict(dtick=1),
+                yaxis=dict(title="Share (%)", range=[0, 100]),
+            )
+            st.plotly_chart(fig_stack, use_container_width=True)
     else:
         st.info("No sublevel data available.")
 
@@ -411,101 +466,107 @@ st.markdown("### 🏗️ Contribution Analysis")
 contrib_data = get_contribution_data(level, element_id)
 
 if contrib_data is not None:
-    col1, col2, col3 = st.columns(3)
-    
     # Top Research Topics (skip for research_topic level)
     if level != "research_topic":
-        with col1:
-            st.markdown("**Top 5 Research Topics**")
-            rt_items = parse_top_items(
-                contrib_data.get("top_research_topics", ""),
-                ["id", "label", "count", "pct"]
-            )
-            if rt_items:
-                rt_df = pd.DataFrame(rt_items)
-                rt_df["count"] = rt_df["count"].apply(safe_int)
-                rt_df["pct"] = rt_df["pct"].apply(safe_float)
-                
-                fig_rt = go.Figure(go.Bar(
-                    y=rt_df["label"].tolist()[::-1],
-                    x=rt_df["count"].tolist()[::-1],
-                    orientation="h",
-                    marker_color="#4e79a7",
-                    text=[f"{p:.1%}" for p in rt_df["pct"].tolist()[::-1]],
-                    textposition="auto",
-                ))
-                fig_rt.update_layout(
-                    height=250,
-                    margin=dict(t=10, l=10, r=10, b=10),
-                    xaxis_title="Publications",
-                    yaxis_title="",
-                )
-                st.plotly_chart(fig_rt, use_container_width=True)
-            else:
-                st.info("No research topic data.")
-    
-    # Department Distribution
-    with col2 if level != "research_topic" else col1:
-        st.markdown("**Department Distribution**")
-        dept_items = parse_top_items(
-            contrib_data.get("department_breakdown", ""),
-            ["dept", "count", "pct"]
+        st.markdown("**Top 5 Research Topics**")
+        rt_items = parse_top_items(
+            contrib_data.get("top_research_topics", ""),
+            ["id", "label", "count", "pct"]
         )
-        if dept_items:
-            dept_df = pd.DataFrame(dept_items)
-            dept_df["count"] = dept_df["count"].apply(safe_int)
-            dept_df["pct"] = dept_df["pct"].apply(safe_float)
-            dept_df = dept_df.sort_values("count", ascending=True)
+        if rt_items:
+            rt_df = pd.DataFrame(rt_items)
+            rt_df["count"] = rt_df["count"].apply(safe_int)
+            rt_df["pct"] = rt_df["pct"].apply(safe_float)
             
-            fig_dept = go.Figure(go.Bar(
-                y=dept_df["dept"].tolist(),
-                x=dept_df["count"].tolist(),
+            fig_rt = go.Figure(go.Bar(
+                y=rt_df["label"].tolist()[::-1],
+                x=rt_df["count"].tolist()[::-1],
                 orientation="h",
-                marker_color="#59a14f",
-                text=[f"{p:.1%}" for p in dept_df["pct"].tolist()],
+                marker_color="#4e79a7",
+                text=[f"{p*100:.1f}%" for p in rt_df["pct"].tolist()[::-1]],
                 textposition="auto",
             ))
-            fig_dept.update_layout(
-                height=250,
-                margin=dict(t=10, l=10, r=10, b=10),
-                xaxis_title="Publications",
-                yaxis_title="",
-            )
-            st.plotly_chart(fig_dept, use_container_width=True)
-        else:
-            st.info("No department data.")
-    
-    # Top 10 Labs
-    with col3 if level != "research_topic" else col2:
-        st.markdown("**Top 10 Labs**")
-        lab_items = parse_top_items(
-            contrib_data.get("top_labs", ""),
-            ["ror", "count", "pct"]
-        )
-        if lab_items:
-            lab_df = pd.DataFrame(lab_items)
-            lab_df["count"] = lab_df["count"].apply(safe_int)
-            lab_df["pct"] = lab_df["pct"].apply(safe_float)
-            lab_df["name"] = lab_df["ror"].apply(lambda x: lab_names.get(x, x))
-            lab_df = lab_df.sort_values("count", ascending=True).tail(10)
-            
-            fig_lab = go.Figure(go.Bar(
-                y=lab_df["name"].tolist(),
-                x=lab_df["count"].tolist(),
-                orientation="h",
-                marker_color="#e15759",
-                text=[f"{p:.1%}" for p in lab_df["pct"].tolist()],
-                textposition="auto",
-            ))
-            fig_lab.update_layout(
+            fig_rt.update_layout(
                 height=300,
                 margin=dict(t=10, l=10, r=10, b=10),
                 xaxis_title="Publications",
                 yaxis_title="",
             )
-            st.plotly_chart(fig_lab, use_container_width=True)
+            st.plotly_chart(fig_rt, use_container_width=True)
         else:
-            st.info("No lab data.")
+            st.info("No research topic data.")
+    
+    # Department Distribution
+    st.markdown("**Department Distribution**")
+    dept_items = parse_top_items(
+        contrib_data.get("department_breakdown", ""),
+        ["dept", "count", "pct"]
+    )
+    if dept_items:
+        dept_df = pd.DataFrame(dept_items)
+        dept_df["count"] = dept_df["count"].apply(safe_int)
+        dept_df["pct"] = dept_df["pct"].apply(safe_float)
+        dept_df = dept_df.sort_values("count", ascending=True)
+        
+        fig_dept = go.Figure(go.Bar(
+            y=dept_df["dept"].tolist(),
+            x=dept_df["count"].tolist(),
+            orientation="h",
+            marker_color="#59a14f",
+            text=[f"{p*100:.1f}%" for p in dept_df["pct"].tolist()],
+            textposition="auto",
+        ))
+        fig_dept.update_layout(
+            height=max(200, len(dept_df) * 40),
+            margin=dict(t=10, l=10, r=10, b=10),
+            xaxis_title="Publications",
+            yaxis_title="",
+        )
+        st.plotly_chart(fig_dept, use_container_width=True)
+    else:
+        st.info("No department data.")
+    
+    # Top 10 Labs
+    st.markdown("**Top 10 Labs / Structures**")
+    render_structure_type_legend()
+    
+    lab_items = parse_top_items(
+        contrib_data.get("top_labs", ""),
+        ["ror", "count", "pct"]
+    )
+    if lab_items:
+        lab_df = pd.DataFrame(lab_items)
+        lab_df["count"] = lab_df["count"].apply(safe_int)
+        lab_df["pct"] = lab_df["pct"].apply(safe_float)
+        
+        # Join with lab info
+        lab_df["name"] = lab_df["ror"].apply(
+            lambda x: lab_info.get(x, {}).get("Structure name", x) if x in lab_info else x
+        )
+        lab_df["type"] = lab_df["ror"].apply(
+            lambda x: lab_info.get(x, {}).get("Structure type", "other") if x in lab_info else "other"
+        )
+        lab_df["color"] = lab_df["type"].apply(lambda x: STRUCTURE_TYPE_COLORS.get(x, STRUCTURE_TYPE_COLORS["other"]))
+        
+        lab_df = lab_df.sort_values("count", ascending=True).tail(10)
+        
+        fig_lab = go.Figure(go.Bar(
+            y=lab_df["name"].tolist(),
+            x=lab_df["count"].tolist(),
+            orientation="h",
+            marker_color=lab_df["color"].tolist(),
+            text=[f"{p*100:.1f}%" for p in lab_df["pct"].tolist()],
+            textposition="auto",
+        ))
+        fig_lab.update_layout(
+            height=350,
+            margin=dict(t=10, l=10, r=10, b=10),
+            xaxis_title="Publications",
+            yaxis_title="",
+        )
+        st.plotly_chart(fig_lab, use_container_width=True)
+    else:
+        st.info("No lab data.")
 
 # =============================================================================
 # Section 6: Partner Tables
@@ -516,51 +577,49 @@ st.markdown("### 🤝 Top Partners")
 partner_data = get_partner_data(level, element_id)
 
 if partner_data is not None:
-    col1, col2 = st.columns(2)
+    # International Partners
+    st.markdown("**Top 10 International Partners**")
+    int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
+    int_items = parse_top_items(
+        partner_data.get(int_col, ""),
+        ["id", "name", "country", "type", "copubs", "pct", "fwci"]
+    )
+    if int_items:
+        int_df = pd.DataFrame(int_items)
+        int_df["copubs"] = int_df["copubs"].apply(safe_int)
+        int_df["pct"] = int_df["pct"].apply(safe_float)
+        int_df["fwci"] = int_df["fwci"].apply(safe_float)
+        
+        int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
+        int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
+        int_display[f"% of {element_name}"] = int_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
+        
+        st.dataframe(int_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("No international partner data.")
     
-    with col1:
-        st.markdown("**Top 10 International Partners**")
-        int_col = [c for c in df_partners.columns if "top_int_partners" in c][0]
-        int_items = parse_top_items(
-            partner_data.get(int_col, ""),
-            ["id", "name", "country", "type", "copubs", "pct", "fwci"]
-        )
-        if int_items:
-            int_df = pd.DataFrame(int_items)
-            int_df["copubs"] = int_df["copubs"].apply(safe_int)
-            int_df["pct"] = int_df["pct"].apply(safe_float)
-            int_df["fwci"] = int_df["fwci"].apply(safe_float)
-            
-            int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
-            int_display.columns = ["Partner", "Country", "Type", "Co-pubs", "% of Element", "Avg FWCI"]
-            int_display["% of Element"] = int_display["% of Element"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "—")
-            int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
-            
-            st.dataframe(int_display, use_container_width=True, hide_index=True)
-        else:
-            st.info("No international partner data.")
-    
-    with col2:
-        st.markdown("**Top 10 French Partners**")
-        fr_col = [c for c in df_partners.columns if "top_fr_partners" in c][0]
-        fr_items = parse_top_items(
-            partner_data.get(fr_col, ""),
-            ["id", "name", "country", "type", "copubs", "pct", "fwci"]
-        )
-        if fr_items:
-            fr_df = pd.DataFrame(fr_items)
-            fr_df["copubs"] = fr_df["copubs"].apply(safe_int)
-            fr_df["pct"] = fr_df["pct"].apply(safe_float)
-            fr_df["fwci"] = fr_df["fwci"].apply(safe_float)
-            
-            fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
-            fr_display.columns = ["Partner", "Type", "Co-pubs", "% of Element", "Avg FWCI"]
-            fr_display["% of Element"] = fr_display["% of Element"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "—")
-            fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
-            
-            st.dataframe(fr_display, use_container_width=True, hide_index=True)
-        else:
-            st.info("No French partner data.")
+    # French Partners
+    st.markdown("**Top 10 French Partners**")
+    fr_col = [c for c in df_partners.columns if "top_fr_partners" in c][0]
+    fr_items = parse_top_items(
+        partner_data.get(fr_col, ""),
+        ["id", "name", "country", "type", "copubs", "pct", "fwci"]
+    )
+    if fr_items:
+        fr_df = pd.DataFrame(fr_items)
+        fr_df["copubs"] = fr_df["copubs"].apply(safe_int)
+        fr_df["pct"] = fr_df["pct"].apply(safe_float)
+        fr_df["fwci"] = fr_df["fwci"].apply(safe_float)
+        
+        fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
+        fr_display.columns = ["Partner", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
+        fr_display[f"% of {element_name}"] = fr_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
+        
+        st.dataframe(fr_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("No French partner data.")
 
 # =============================================================================
 # Section 7: Strategic Reciprocity Chart (for OA taxonomy only)
@@ -569,15 +628,15 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
     st.markdown("---")
     st.markdown("### ⚖️ Strategic Reciprocity with Partners")
     
-    st.markdown("""
+    st.markdown(f"""
     **How to read this chart**
     
     - Each bubble represents a partner institution. Its **size** is proportional to
-      that partner's total publications in this thematic area.
-    - The **vertical position** (y-axis) shows the share of UL's output in this area
+      that partner's total publications in **{element_name}**.
+    - The **vertical position** (y-axis) shows the share of UL's output in {element_name}
       that is co-authored with this partner.
     - The **horizontal position** (x-axis) shows the share of the **partner's**
-      output in this area that involves UL.
+      output in {element_name} that involves UL.
     - The grey **diagonal line** indicates balanced relationships.
         - Bubbles **to the right** of the diagonal: UL is more important to the partner than vice versa.
         - Bubbles **to the left** of the diagonal: The partner is more important to UL than vice versa.
@@ -645,9 +704,9 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                     "Country: %{customdata[0]}<br>"
                     "Type: %{customdata[1]}<br>"
                     "Co-publications: %{customdata[2]:,}<br>"
-                    "Share of UL's output: %{customdata[3]:.1%}<br>"
-                    "Share of partner's output: %{customdata[4]:.1%}<br>"
-                    "Partner's total in area: %{customdata[5]:,}<extra></extra>"
+                    f"Share of UL's {element_name}: " + "%{customdata[3]:.1%}<br>"
+                    f"Share of partner's {element_name}: " + "%{customdata[4]:.1%}<br>"
+                    f"Partner's total in {element_name}: " + "%{customdata[5]:,}<extra></extra>"
                 )
             )
             
@@ -661,20 +720,19 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
             )
             
             fig_recip.update_layout(
-                height=500,
+                height=550,
                 margin=dict(t=30, l=50, r=30, b=50),
                 xaxis=dict(
-                    title="Share of partner's output in this area",
+                    title=f"Share of partner's {element_name} output",
                     tickformat=".0%",
                     range=[0, max_val],
                 ),
                 yaxis=dict(
-                    title="Share of UL's output in this area",
+                    title=f"Share of UL's {element_name} output",
                     tickformat=".0%",
                     range=[0, max_val],
                 ),
-                showlegend=True,
-                legend=dict(title=""),
+                showlegend=False,
             )
             
             # Custom legend
@@ -690,7 +748,6 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
                 unsafe_allow_html=True,
             )
             
-            fig_recip.update_layout(showlegend=False)
             st.plotly_chart(fig_recip, use_container_width=True)
         else:
             st.info("No reciprocity data available for this element.")
@@ -720,8 +777,8 @@ if author_data is not None:
         auth_df["is_lorraine"] = auth_df["is_lorraine"].apply(lambda x: x.lower() == "true" if isinstance(x, str) else bool(x))
         
         auth_display = auth_df[["name", "orcid", "pubs", "pct", "fwci", "is_lorraine", "labs"]].copy()
-        auth_display.columns = ["Author", "ORCID", "Pubs", "% of Element", "Avg FWCI", "UL Affiliation", "Labs"]
-        auth_display["% of Element"] = auth_display["% of Element"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "—")
+        auth_display.columns = ["Author", "ORCID", "Pubs", f"% of {element_name}", "Avg FWCI", "UL Affiliation", "Labs"]
+        auth_display[f"% of {element_name}"] = auth_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
         auth_display["Avg FWCI"] = auth_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         auth_display["UL Affiliation"] = auth_display["UL Affiliation"].apply(lambda x: "✅" if x else "")
         auth_display["Labs"] = auth_display["Labs"].apply(lambda x: x.replace("/", " | ") if x else "")
