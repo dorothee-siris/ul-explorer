@@ -160,6 +160,20 @@ def get_contribution_data(level, element_id):
         return None
     return rows.iloc[0]
 
+def find_column(row_or_df, pattern):
+    """Find column name containing a pattern (handles columns with format descriptions)."""
+    if hasattr(row_or_df, 'index'):
+        # It's a Series (row)
+        cols = row_or_df.index
+    else:
+        # It's a DataFrame
+        cols = row_or_df.columns
+    
+    for col in cols:
+        if pattern in col:
+            return col
+    return None
+
 def get_partner_data(level, element_id):
     """Get partner data."""
     mask = (df_partners["level"] == level) & (df_partners["id"] == str(element_id))
@@ -454,11 +468,14 @@ contrib_data = get_contribution_data(level, element_id)
 if contrib_data is not None:
     if level != "research_topic":
         st.markdown("**Top 5 Research Topics**")
-        # Format: id:label:count:share
-        rt_items = parse_top_items(
-            contrib_data.get("top_research_topics", ""),
-            ["id", "label", "count", "pct"]
-        )
+        # Find the actual column name (may include format description)
+        rt_col = find_column(contrib_data, "top_research_topics")
+        rt_items = []
+        if rt_col:
+            rt_items = parse_top_items(
+                contrib_data.get(rt_col, ""),
+                ["id", "label", "count", "pct"]
+            )
         if rt_items:
             rt_df = pd.DataFrame(rt_items)
             rt_df["count"] = rt_df["count"].apply(safe_int)
@@ -483,11 +500,13 @@ if contrib_data is not None:
             st.info("No research topic data.")
     
     st.markdown("**Department Distribution**")
-    # Format: dept:count:share
-    dept_items = parse_top_items(
-        contrib_data.get("department_breakdown", ""),
-        ["dept", "count", "pct"]
-    )
+    dept_col = find_column(contrib_data, "department_breakdown")
+    dept_items = []
+    if dept_col:
+        dept_items = parse_top_items(
+            contrib_data.get(dept_col, ""),
+            ["dept", "count", "pct"]
+        )
     if dept_items:
         dept_df = pd.DataFrame(dept_items)
         dept_df["count"] = dept_df["count"].apply(safe_int)
@@ -517,17 +536,18 @@ if contrib_data is not None:
     st.markdown("**Top 10 Labs / Internal Structures**")
     render_structure_type_legend()
     
-    # FIXED: Format is ror:name:type:count:share (5 fields, not 3!)
-    lab_items = parse_top_items(
-        contrib_data.get("top_labs", ""),
-        ["ror", "name", "type", "count", "pct"]
-    )
+    lab_col = find_column(contrib_data, "top_labs")
+    lab_items = []
+    if lab_col:
+        lab_items = parse_top_items(
+            contrib_data.get(lab_col, ""),
+            ["ror", "name", "type", "count", "pct"]
+        )
     if lab_items:
         lab_df = pd.DataFrame(lab_items)
         lab_df["count"] = lab_df["count"].apply(safe_int)
         lab_df["pct"] = lab_df["pct"].apply(safe_float)
         
-        # Color by structure type (already in data, no need for lookup!)
         lab_df["color"] = lab_df["type"].apply(
             lambda x: STRUCTURE_TYPE_COLORS.get(x, STRUCTURE_TYPE_COLORS["other"])
         )
