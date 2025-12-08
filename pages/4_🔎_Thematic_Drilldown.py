@@ -501,7 +501,7 @@ if contrib_data is not None:
                 textposition="auto",
             ))
             fig_rt.update_layout(
-                height=300,
+                height=600,
                 margin=dict(t=10, l=10, r=10, b=10),
                 xaxis_title="Publications",
                 yaxis_title="",
