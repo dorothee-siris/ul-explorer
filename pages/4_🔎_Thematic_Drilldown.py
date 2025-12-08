@@ -507,7 +507,7 @@ if contrib_data is not None:
                 yaxis_title="",
             )
 
-            fig_rt.update_yaxes(tickfont_size=12)
+            fig_rt.update_yaxes(tickfont_size=14)
 
             st.plotly_chart(fig_rt, use_container_width=True)
         else:
