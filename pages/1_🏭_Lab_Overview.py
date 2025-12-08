@@ -32,6 +32,8 @@ from lib.helpers import (
     parse_fwci_boxplot_blob, parse_subfield_column,
     # Utilities
     pad_dataframe, build_openalex_url,
+    # Legend
+    render_domain_legend
 )
 
 # ============================================================================
@@ -650,21 +652,6 @@ def render_subfield_wordcloud(df_sub: pd.DataFrame, title: str = ""):
         ax.set_title(title, fontsize=12, pad=10)
     plt.tight_layout()
     st.pyplot(fig)
-
-
-# ============================================================================
-# DOMAIN LEGEND COMPONENT
-# ============================================================================
-
-def render_domain_legend():
-    """Render inline domain color legend."""
-    items = "".join(
-        f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
-        f'<span style="width:14px;height:14px;background:{get_domain_color(d)};border-radius:3px;margin-right:6px;"></span>'
-        f'{d}</span>'
-        for d in DOMAIN_NAMES_ORDERED
-    )
-    st.markdown(f'<div style="margin:8px 0 16px 0;">{items}</div>', unsafe_allow_html=True)
 
 
 # ============================================================================

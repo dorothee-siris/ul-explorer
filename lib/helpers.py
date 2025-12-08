@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Any
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 # ============================================================================
 # CONSTANTS
@@ -45,6 +46,13 @@ DOMAIN_COLORS = {
     "Other": "#7f7f7f",
 }
 
+DOMAIN_EMOJI = {
+    "Health Sciences": "🟥",
+    "Life Sciences": "🟩",
+    "Physical Sciences": "🟦",
+    "Social Sciences": "🟨",
+    "Other": "⬜",
+}
 
 # ============================================================================
 # SAFE CONVERTERS
@@ -547,3 +555,13 @@ def build_openalex_url(openalex_id: str) -> str:
     if not oid.startswith("http"):
         return f"https://openalex.org/{oid}"
     return oid
+
+def render_domain_legend():
+    """Render inline domain color legend."""
+    items = "".join(
+        f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
+        f'<span style="width:14px;height:14px;background:{get_domain_color(d)};border-radius:3px;margin-right:6px;"></span>'
+        f'{d}</span>'
+        for d in DOMAIN_NAMES_ORDERED
+    )
+    st.markdown(f'<div style="margin:8px 0 16px 0;">{items}</div>', unsafe_allow_html=True)
