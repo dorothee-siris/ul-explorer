@@ -610,12 +610,12 @@ if partner_data is not None:
         int_df["share_partner"] = int_df["share_partner"].apply(safe_float)
         int_df["fwci"] = int_df["fwci"].apply(safe_float)
         
-        int_display = int_df[["name", "country", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]].copy()
+        int_display = int_df[["name", "country", "type", "copubs", "share_ul",  "share_partner","share_int", "fwci"]].copy()
         int_display.columns = [
             "Partner", "Country", "Type", "Co-pubs",
             f"% of UL's {level_label}",
-            "% of collab.",
             f"% of partner's {level_label}",
+            "% of collab.",
             "Avg FWCI"
         ]
         int_display[f"% of UL's {level_label}"] = int_display[f"% of UL's {level_label}"] * 100
@@ -667,12 +667,12 @@ if partner_data is not None:
         fr_df["share_partner"] = fr_df["share_partner"].apply(safe_float)
         fr_df["fwci"] = fr_df["fwci"].apply(safe_float)
         
-        fr_display = fr_df[["name", "type", "copubs", "share_ul", "share_int", "share_partner", "fwci"]].copy()
+        fr_display = fr_df[["name", "type", "copubs", "share_ul", "share_partner", "share_int", "fwci"]].copy()
         fr_display.columns = [
             "Partner", "Type", "Co-pubs",
             f"% of UL's {level_label}",
-            "% of collab.",
             f"% of partner's {level_label}",
+            "% of collab.",
             "Avg FWCI"
         ]
         fr_display[f"% of UL's {level_label}"] = fr_display[f"% of UL's {level_label}"] * 100
