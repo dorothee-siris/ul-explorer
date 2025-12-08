@@ -103,12 +103,22 @@ def load_lab_info():
         st.warning(f"Could not load lab info: {e}")
         return {}
 
+@st.cache_data
+def load_partners_base():
+    """Load partner base data for reciprocity calculations."""
+    try:
+        return pd.read_parquet("data/ul_partners_base.parquet")
+    except Exception as e:
+        st.warning(f"Could not load partners base: {e}")
+        return pd.DataFrame()
+
 df_overview = load_thematic_overview()
 df_sublevels = load_thematic_sublevels()
 df_contributions = load_thematic_contributions()
 df_partners = load_thematic_partners()
 df_authors = load_thematic_authors()
 lab_info = load_lab_info()
+df_partners_base = load_partners_base()
 
 # Lookups
 domain_id2name = get_domain_id_to_name()
@@ -211,6 +221,73 @@ def get_author_data(level, element_id):
     if rows.empty:
         return None
     return rows.iloc[0]
+
+def get_partner_total_in_theme(partner_id, level, element_id):
+    """
+    Get partner's total publications in a specific thematic area from ul_partners_base.parquet.
+    
+    For domains: Use "Pubs breakdown per domain (partner total)" - pipe-separated, order: domain 1,2,3,4
+    For fields: Use "Pubs breakdown per field (partner total)" - pipe-separated, ascending field ID order (11-36)
+    For subfields: Use "Pubs per subfield within X (id: Y) (partner total)" columns
+    """
+    if df_partners_base.empty:
+        return 0
+    
+    # Find the partner row
+    partner_row = df_partners_base[df_partners_base["Partner ID"] == partner_id]
+    if partner_row.empty:
+        return 0
+    partner_row = partner_row.iloc[0]
+    
+    try:
+        element_id_int = int(element_id)
+    except (ValueError, TypeError):
+        return 0
+    
+    if level == "domain":
+        # Domains are stored as "count1 | count2 | count3 | count4" for domains 1,2,3,4
+        blob = partner_row.get("Pubs breakdown per domain (partner total)", "")
+        if pd.isna(blob) or not str(blob).strip():
+            return 0
+        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
+        # Domain IDs are 1,2,3,4 - index is domain_id - 1
+        idx = element_id_int - 1
+        return vals[idx] if 0 <= idx < len(vals) else 0
+    
+    elif level == "field":
+        # Fields are stored in ascending order of field ID (11-36)
+        blob = partner_row.get("Pubs breakdown per field (partner total)", "")
+        if pd.isna(blob) or not str(blob).strip():
+            return 0
+        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
+        # Field IDs start at 11, so index is field_id - 11
+        idx = element_id_int - 11
+        return vals[idx] if 0 <= idx < len(vals) else 0
+    
+    elif level == "subfield":
+        # Subfields are in columns like "Pubs per subfield within X (id: Y) (partner total)"
+        # Find the right column based on the parent field
+        # Subfield ID format: XXYY where XX is field_id, YY is position
+        parent_field_id = element_id_int // 100
+        
+        # Find the column for this field
+        col_pattern = f'Pubs per subfield within'
+        matching_cols = [c for c in df_partners_base.columns if col_pattern in c and f"(id: {parent_field_id})" in c and "(partner total)" in c]
+        
+        if not matching_cols:
+            return 0
+        
+        col = matching_cols[0]
+        blob = partner_row.get(col, "")
+        if pd.isna(blob) or not str(blob).strip():
+            return 0
+        
+        vals = [safe_int(x.strip()) for x in str(blob).split("|")]
+        # Position within the field's subfields
+        idx = element_id_int % 100
+        return vals[idx] if 0 <= idx < len(vals) else 0
+    
+    return 0
 
 def render_structure_type_legend():
     """Render legend for structure types."""
@@ -352,11 +429,11 @@ if level in ["domain", "field", "subfield"]:
             sub_table.append({
                 "Name": row["child_name"],
                 "Pubs": int(row["pubs_total"]),
-                f"% of {level_label}": row["pubs_pct_of_parent"] * 100,  # Multiply by 100 for progress bar
-                "% ISITE": row["pct_isite"] * 100,  # Multiply by 100 for progress bar
+                f"{level_label} share": row["pubs_pct_of_parent"] * 100,  # Multiply by 100 for progress bar
+                "ISITE contribution": row["pct_isite"] * 100,  # Multiply by 100 for progress bar
                 "% Top 10%": format_pct(row["pct_top10"]),
                 "% Top 1%": format_pct(row["pct_top1"]),
-                "% Int'l": format_pct(row["pct_international"]),
+                "% International": format_pct(row["pct_international"]),
                 "Median FWCI": f"{row['fwci_median']:.2f}" if pd.notna(row['fwci_median']) else "—",
                 "Avg. FWCI": f"{row['fwci_mean']:.2f}" if pd.notna(row['fwci_mean']) else "—",
                 "CAGR": format_cagr(row["cagr_2019_2023"]),
@@ -369,14 +446,14 @@ if level in ["domain", "field", "subfield"]:
             hide_index=True,
             height=min(400, 35 + len(sub_table) * 35),
             column_config={
-                f"% of {level_label}": st.column_config.ProgressColumn(
-                    f"% of {level_label}",
+                f"{level_label} share": st.column_config.ProgressColumn(
+                    f"{level_label} share",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
                 ),
-                "% ISITE": st.column_config.ProgressColumn(
-                    "% ISITE",
+                "ISITE contribution": st.column_config.ProgressColumn(
+                    "ISITE contribution",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
@@ -520,6 +597,8 @@ if contrib_data is not None:
             marker_color="#59a14f",
             text=[f"{p*100:.1f}%" for p in dept_df["pct"].tolist()],
             textposition="auto",
+            insidetextfont=dict(color="white"),
+            outsidetextfont=dict(color="black"),
         ))
         fig_dept.update_layout(
             height=max(200, len(dept_df) * 40),
@@ -610,9 +689,9 @@ if partner_data is not None:
         int_df["fwci"] = int_df["fwci"].apply(safe_float)
         
         int_display = int_df[["name", "country", "type", "copubs", "pct", "fwci"]].copy()
-        int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
+        int_display.columns = ["Partner", "Country", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
         # Convert to percentage scale for progress bar
-        int_display[f"% of {element_name}"] = int_display[f"% of {element_name}"] * 100
+        int_display[f"{level_label} share"] = int_display[f"{level_label} share"] * 100
         int_display["Avg FWCI"] = int_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
         st.dataframe(
@@ -620,8 +699,8 @@ if partner_data is not None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                f"% of {element_name}": st.column_config.ProgressColumn(
-                    f"% of {element_name}",
+                f"{level_label} share": st.column_config.ProgressColumn(
+                    f"{level_label} share",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
@@ -645,9 +724,9 @@ if partner_data is not None:
         fr_df["fwci"] = fr_df["fwci"].apply(safe_float)
         
         fr_display = fr_df[["name", "type", "copubs", "pct", "fwci"]].copy()
-        fr_display.columns = ["Partner", "Type", "Co-pubs", f"% of {element_name}", "Avg FWCI"]
+        fr_display.columns = ["Partner", "Type", "Co-pubs", f"{level_label} share", "Avg FWCI"]
         # Convert to percentage scale for progress bar
-        fr_display[f"% of {element_name}"] = fr_display[f"% of {element_name}"] * 100
+        fr_display[f"{level_label} share"] = fr_display[f"{level_label} share"] * 100
         fr_display["Avg FWCI"] = fr_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         
         st.dataframe(
@@ -655,8 +734,8 @@ if partner_data is not None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                f"% of {element_name}": st.column_config.ProgressColumn(
-                    f"% of {element_name}",
+                f"{level_label} share": st.column_config.ProgressColumn(
+                    f"{level_label} share",
                     min_value=0,
                     max_value=100,
                     format="%.1f%%",
@@ -698,7 +777,17 @@ if level in ["domain", "field", "subfield"] and partner_data is not None:
         recip_df["copubs"] = recip_df["copubs"].apply(safe_int)
         recip_df["share_ul"] = recip_df["share_ul"].apply(safe_float)
         recip_df["share_partner"] = recip_df["share_partner"].apply(safe_float)
-        recip_df["partner_total"] = recip_df["partner_total"].apply(safe_int)
+        
+        # Recalculate partner_total from ul_partners_base.parquet
+        recip_df["partner_total"] = recip_df["id"].apply(
+            lambda pid: get_partner_total_in_theme(pid, level, element_id)
+        )
+        
+        # Recalculate share_partner based on correct partner_total
+        recip_df["share_partner"] = recip_df.apply(
+            lambda row: row["copubs"] / row["partner_total"] if row["partner_total"] > 0 else 0,
+            axis=1
+        )
         
         # Filter out rows with zero shares
         recip_df = recip_df[(recip_df["share_ul"] > 0) | (recip_df["share_partner"] > 0)]
@@ -824,9 +913,9 @@ if author_data is not None:
         auth_df["name"] = auth_df["name"].apply(add_spaces_to_name)
         
         auth_display = auth_df[["name", "orcid", "pubs", "pct", "fwci", "is_lorraine", "labs"]].copy()
-        auth_display.columns = ["Author", "ORCID", "Pubs", f"% of {element_name}", "Avg FWCI", "UL Affiliation", "Labs"]
-        auth_display[f"% of {element_name}"] = auth_display[f"% of {element_name}"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
-        auth_display["Avg FWCI"] = auth_display["Avg FWCI"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
+        auth_display.columns = ["Author", "ORCID", "Pubs", f"{level_label} share", "Avg. FWCI in {level_label}", "UL Affiliation", "Labs"]
+        auth_display[f"{level_label} share"] = auth_display[f"{level_label} share"].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "—")
+        auth_display[f"Avg. FWCI in {level_label}"] = auth_display[f"Avg. FWCI in {level_label}"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
         auth_display["UL Affiliation"] = auth_display["UL Affiliation"].apply(lambda x: "✅" if x else "")
         auth_display["Labs"] = auth_display["Labs"].apply(lambda x: x.replace("/", " | ") if x else "")
         
