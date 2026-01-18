@@ -161,9 +161,9 @@ if color_metric == "fwci_median":
         values="pubs",
         color="fwci_median",
         color_continuous_scale=[
-            [0.0, "#d73027"],    # Red for 0
-            [0.5, "#999999"],    # Grey for 1
-            [1.0, "#1a9850"],    # Green for 2+
+            [0.0, "#EC8773"],    # Red for 0
+            [0.5, "#F4D570"],    # Grey for 1
+            [1.0, "#60CCAA"],    # Green for 2+
         ],
         range_color=[0, 2],
     )
