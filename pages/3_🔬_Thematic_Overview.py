@@ -137,18 +137,15 @@ Click to drill down from domains → fields → subfields. Use the breadcrumb tr
 # Prepare treemap data with additional count columns
 # Filter to exclude topic level (keep only domain, field, subfield)
 df_treemap = df_treemap_raw[df_treemap_raw["level"].isin(["domain", "field", "subfield"])].copy()
-df_treemap["count_top10"] = (df_treemap["pct_top10"] * df_treemap["pubs"]).round().astype(int)
-df_treemap["count_top1"] = ((df_treemap["pct_top10"] / 10) * df_treemap["pubs"]).round().astype(int)  # Approximate
-df_treemap["count_isite"] = (df_treemap["pct_isite"] * df_treemap["pubs"]).round().astype(int)
+
 
 # Color metric selector
 color_metric = st.selectbox(
     "Color by:",
-    ["fwci_median", "count_isite", "count_top10", "pct_international"],
+    ["fwci_median", "pct_top10", "pct_international"],
     format_func=lambda x: {
         "fwci_median": "Median FWCI (citation impact)",
-        "count_isite": "Count of ISITE publications",
-        "count_top10": "Count of Top 10% publications",
+        "pct_top10": "% Top 10% publications",
         "pct_international": "% International collaborations",
     }.get(x, x)
 )
@@ -189,17 +186,13 @@ fig_treemap.update_traces(
         df_treemap["pct_top10"] * 100,
         df_treemap["pct_international"] * 100,
         df_treemap["pct_isite"] * 100,
-        df_treemap["count_isite"],
-        df_treemap["count_top10"],
     ], axis=-1),
     hovertemplate="<b>%{label}</b><br>" +
                   "Publications: %{customdata[0]:,}<br>" +
                   "FWCI median: %{customdata[1]:.2f}<br>" +
                   "Top 10%%: %{customdata[2]:.1f}%<br>" +
                   "International: %{customdata[3]:.1f}%<br>" +
-                  "ISITE: %{customdata[4]:.1f}%<br>" +
-                  "ISITE count: %{customdata[5]:,}<br>" +
-                  "Top 10%% count: %{customdata[6]:,}<extra></extra>"
+                  "ISITE: %{customdata[4]:.1f}%<extra></extra>"
 )
 
 fig_treemap.update_layout(
