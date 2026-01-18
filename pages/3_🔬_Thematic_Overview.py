@@ -207,6 +207,10 @@ st.plotly_chart(fig_treemap, use_container_width=True)
 # =============================================================================
 st.markdown("---")
 st.markdown("## 🌐 Domains")
+st.markdown("""
+Domains represent the highest level of thematic classification in OpenAlex. 
+All research output is distributed across four broad domains: Life Sciences, Social Sciences, Physical Sciences, and Health Sciences.
+""")
 render_domain_legend()
 
 df_domains = df_overview[df_overview["level"] == "domain"].copy()
@@ -315,6 +319,10 @@ if boxplot_data:
 # =============================================================================
 st.markdown("---")
 st.markdown("## 📚 Fields")
+st.markdown("""
+Fields are the second level of the OpenAlex taxonomy, grouping related disciplines within each domain. 
+This view highlights the institution's disciplinary strengths and citation performance across 26 fields.
+""")
 render_domain_legend()
 
 df_fields = df_overview[df_overview["level"] == "field"].copy()
@@ -359,8 +367,16 @@ st.dataframe(
     }
 )
 
-# FWCI Distribution boxplots - horizontal, ordered by domain
+# =============================================================================
+# FWCI Distribution by Field
+# =============================================================================
 st.markdown("### FWCI Distribution by Field")
+
+st.markdown("""
+This chart shows the distribution of Field-Weighted Citation Impact (FWCI) across fields.
+By default, extreme values are hidden (showing percentiles 10-90) to facilitate comparison between fields.
+Toggle the option below to include the full range (min to max).
+""")
 
 use_extreme_fields = st.toggle("Include extreme values (p0, p100)", value=False, key="field_extreme")
 
@@ -391,8 +407,10 @@ if boxplot_data_fields:
     for item in boxplot_data_fields:
         if use_extreme_fields:
             lower, upper = item["p0"], item["p100"]
+            range_label = "min-max"
         else:
             lower, upper = item["p10"], item["p90"]
+            range_label = "p10-p90"
         
         fig_box_fields.add_trace(go.Box(
             x=[item["field"]],
@@ -405,28 +423,36 @@ if boxplot_data_fields:
             fillcolor=item["color"],
             line=dict(color=item["color"]),
             boxpoints=False,
-            name=item["field"],
+            name=f"{item['field']} (n={item['count']:,})",
             showlegend=False,
         ))
     
-    # Add count annotations
+    # Add count annotations (straight orientation, no "n=" prefix)
     for i, item in enumerate(boxplot_data_fields):
         fig_box_fields.add_annotation(
             x=item["field"],
-            y=-0.12,
+            y=-0.03,
             yref="paper",
-            text=f"n={item['count']:,}",
+            text=f"{item['count']:,}",
             showarrow=False,
             font=dict(size=9, color="#666"),
-            textangle=-45,
+            textangle=0,
         )
     
     fig_box_fields.update_layout(
-        height=450,
-        margin=dict(t=30, l=50, r=30, b=120),
+        height=500,
+        margin=dict(t=30, l=50, r=30, b=160),
         yaxis_title="FWCI",
         xaxis_title="",
         xaxis_tickangle=-45,
+        xaxis=dict(
+            tickfont=dict(size=10),
+        ),
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12,
+            font_family="Arial",
+        ),
     )
     st.plotly_chart(fig_box_fields, use_container_width=True)
 
@@ -435,6 +461,10 @@ if boxplot_data_fields:
 # =============================================================================
 st.markdown("---")
 st.markdown("## 📖 Subfields")
+st.markdown("""
+Subfields provide finer granularity, breaking down each field into more specific research areas. 
+Use the filters below to explore subfields by domain or search for specific topics.
+""")
 render_domain_legend()
 
 df_subfields = df_overview[df_overview["level"] == "subfield"].copy()
@@ -506,6 +536,10 @@ st.caption(f"Showing {len(subfield_table)} subfields")
 # =============================================================================
 st.markdown("---")
 st.markdown("## 🏷️ Topics (OpenAlex)")
+st.markdown("""
+Topics are the most granular level of the OpenAlex taxonomy, representing specific research areas within subfields.
+Each publication is assigned to a single primary topic based on its content. Use the filters to explore the top 200 topics by volume.
+""")
 render_domain_legend()
 
 df_topics = df_overview[df_overview["level"] == "topic"].copy()
@@ -578,8 +612,12 @@ st.markdown("---")
 st.markdown("## 🧬 Research Topics (Topic Model)")
 
 st.markdown("""
-These topics were identified through bottom-up clustering of research abstracts using LLM-based extraction.
-They reveal thematic patterns that may cut across traditional disciplinary boundaries.
+These topics were identified through a bottom-up approach: research themes are first extracted from publication abstracts 
+using a LLM, then grouped into coherent clusters using HDBSCAN, a density-based clustering algorithm 
+that automatically identifies topic boundaries based on the concentration of similar themes.
+
+Unlike the OpenAlex taxonomy, these topics can reveal cross-disciplinary patterns and emerging research themes 
+that don't fit traditional classifications.
 """)
 
 df_research = df_overview[df_overview["level"] == "research_topic"].copy()
@@ -624,8 +662,9 @@ st.dataframe(
 st.markdown("### Research Topics × Domains Heatmap")
 
 st.markdown("""
-This heatmap shows how each research topic distributes across the four scientific domains.
+This heatmap shows how each topic distributes across the four scientific domains.
 Darker cells indicate higher publication counts. Topics spanning multiple domains reveal interdisciplinary research.
+Toggle normalization to see the relative distribution within each topic rather than absolute counts.
 """)
 
 # Build heatmap matrix

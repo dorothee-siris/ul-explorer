@@ -38,7 +38,7 @@ st.set_page_config(
 )
 
 st.title("🔎 Thematic Drill-Down")
-st.markdown("Explore detailed metrics for a specific domain, field, subfield, or research topic.")
+st.markdown("Explore detailed metrics for a specific domain, field, subfield, or research topic (bottom-up).")
 
 # =============================================================================
 # Constants
@@ -259,6 +259,18 @@ with col1:
 with col2:
     element_options = get_element_options(level)
     if element_options:
+        # For subfield level, add a search filter due to large number of options
+        if level == "subfield":
+            search_term = st.text_input("Search subfield:", "", key="subfield_search_drilldown")
+            if search_term:
+                element_options = [
+                    (eid, label) for eid, label in element_options 
+                    if search_term.lower() in label.lower()
+                ]
+            if not element_options:
+                st.warning("No subfields match your search.")
+                st.stop()
+        
         element_id = st.selectbox(
             "Select element:",
             options=[opt[0] for opt in element_options],
@@ -280,13 +292,37 @@ level_label = LEVEL_LABELS.get(level, level.title())
 # Display element name as header
 st.markdown(f"## {element_name}")
 
+# Show hierarchy for fields and subfields
+if level == "field":
+    parent_domain = element_data.get('parent_name', '')
+    if parent_domain:
+        st.markdown(f"**Domain:** {parent_domain}")
+
+elif level == "subfield":
+    parent_field_id = element_data.get('parent_id')
+    parent_field_name = element_data.get('parent_name', '')
+    # Look up the domain from the field
+    if parent_field_id:
+        try:
+            field_id_int = int(parent_field_id)
+            domain_id = field_id2domain.get(field_id_int)
+            domain_name = domain_id2name.get(domain_id, '')
+            if parent_field_name and domain_name:
+                st.markdown(f"**Field:** {parent_field_name} · **Domain:** {domain_name}")
+            elif parent_field_name:
+                st.markdown(f"**Field:** {parent_field_name}")
+        except (ValueError, TypeError):
+            if parent_field_name:
+                st.markdown(f"**Field:** {parent_field_name}")
+
 # For research topics, show methodology info and keywords
 if level == "research_topic":
     st.markdown("""
     <div style="background:#f8f9fa;padding:12px 16px;border-radius:8px;border-left:4px solid #6c757d;margin-bottom:16px;">
     <strong>📌 About this topic:</strong> Research topics are identified through a bottom-up approach: 
-    key themes are extracted from publication abstracts using a Large Language Model, 
-    then grouped into coherent clusters using k-means clustering.
+    key themes are extracted from publication abstracts using a LLM, 
+    then grouped into coherent clusters using HDBSCAN, a density-based clustering algorithm 
+    that automatically identifies topic boundaries based on the concentration of similar themes.
     </div>
     """, unsafe_allow_html=True)
     
