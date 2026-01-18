@@ -86,13 +86,20 @@ def get_domain_emoji(dom_name):
 def format_pct(val):
     if pd.isna(val):
         return "—"
-    return f"{val*100:.1f}%"
+    try:
+        return f"{float(val)*100:.1f}%"
+    except (ValueError, TypeError):
+        return "—"
 
 def format_cagr(val):
     if pd.isna(val):
         return "—"
-    arrow = "↑" if val > 0 else ("↓" if val < 0 else "→")
-    return f"{arrow} {val*100:+.1f}%"
+    try:
+        val = float(val)
+        arrow = "↑" if val > 0 else ("↓" if val < 0 else "→")
+        return f"{arrow} {val*100:+.1f}%"
+    except (ValueError, TypeError):
+        return "—"
 
 def parse_fwci_boxplot(blob):
     if pd.isna(blob) or not str(blob).strip():
@@ -124,11 +131,12 @@ st.markdown("## 📊 Research Portfolio Treemap")
 
 st.markdown("""
 **How to read this chart**: Each rectangle represents a thematic area. Size reflects publication volume.
-Click to drill down from domains → fields → subfields → topics. Use the breadcrumb trail to navigate back.
+Click to drill down from domains → fields → subfields. Use the breadcrumb trail to navigate back.
 """)
 
 # Prepare treemap data with additional count columns
-df_treemap = df_treemap_raw.copy()
+# Filter to exclude topic level (keep only domain, field, subfield)
+df_treemap = df_treemap_raw[df_treemap_raw["level"].isin(["domain", "field", "subfield"])].copy()
 df_treemap["count_top10"] = (df_treemap["pct_top10"] * df_treemap["pubs"]).round().astype(int)
 df_treemap["count_top1"] = ((df_treemap["pct_top10"] / 10) * df_treemap["pubs"]).round().astype(int)  # Approximate
 df_treemap["count_isite"] = (df_treemap["pct_isite"] * df_treemap["pubs"]).round().astype(int)
@@ -479,6 +487,7 @@ for _, row in df_subfields_filtered.iterrows():
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Top 1%": format_pct(row["pct_top1"]),
         "% Int'l": format_pct(row["pct_international"]),
+        "% SDG": format_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -548,6 +557,7 @@ for _, row in df_topics_filtered.iterrows():
         "% ISITE": row["pct_isite"],
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Int'l": format_pct(row["pct_international"]),
+        "% SDG": format_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
