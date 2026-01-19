@@ -178,6 +178,8 @@ else:
         color_continuous_scale="Blues",
     )
 
+fig_treemap.update_traces(branchvalues="total")
+
 # Update hover template
 fig_treemap.update_traces(
     customdata=np.stack([
@@ -198,6 +200,11 @@ fig_treemap.update_traces(
 fig_treemap.update_layout(
     margin=dict(t=30, l=10, r=10, b=10),
     height=600,
+)
+
+fig_treemap.update_traces(
+    maxdepth=3,  # Show only 2 levels at a time (current + one level of children)
+    tiling=dict(pad=0),
 )
 
 st.plotly_chart(fig_treemap, use_container_width=True)
