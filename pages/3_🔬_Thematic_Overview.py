@@ -123,6 +123,26 @@ def parse_pubs_per_domain(blob):
                 pass
     return result
 
+def to_pct(val):
+    """Convert 0-1 float to rounded 0-100 float for ProgressColumn, or None."""
+    if pd.isna(val):
+        return None
+    try:
+        return round(float(val) * 100, 1)
+    except (ValueError, TypeError):
+        return None
+
+PERCENT_COL_CONFIG = {
+    "% Total": st.column_config.ProgressColumn("% Total", min_value=0, max_value=100, format="%.1f%%"),
+    "Contribution ISITE": st.column_config.ProgressColumn("Contribution ISITE", min_value=0, max_value=100, format="%.1f%%"),
+    "% Top 10%": st.column_config.ProgressColumn("% Top 10%", min_value=0, max_value=100, format="%.1f%%"),
+    "% Top 1%": st.column_config.ProgressColumn("% Top 1%", min_value=0, max_value=100, format="%.1f%%"),
+    "% Int'l": st.column_config.ProgressColumn("% Int'l", min_value=0, max_value=100, format="%.1f%%"),
+    "% Company": st.column_config.ProgressColumn("% Company", min_value=0, max_value=100, format="%.1f%%"),
+    "% SDG": st.column_config.ProgressColumn("% SDG", min_value=0, max_value=100, format="%.1f%%"),
+    "CAGR": st.column_config.TextColumn("CAGR"),
+}
+
 # =============================================================================
 # Section 1: Interactive Treemap
 # =============================================================================
@@ -233,13 +253,13 @@ for _, row in df_domains.iterrows():
     domain_table.append({
         "Domain": f"{get_domain_emoji(dom_name)} {dom_name}",
         "Pubs": int(row["pubs_total"]),
-        "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,  # Keep as float for progress bar
-        "% Top 10%": format_pct(row["pct_top10"]),
-        "% Top 1%": format_pct(row["pct_top1"]),
-        "% Int'l": format_pct(row["pct_international"]),
-        "% Company": format_pct(row["pct_company"]),
-        "% SDG": format_pct(row["pct_sdg"]),
+        "% Total": to_pct(row["pubs_pct_of_ul"]),
+        "Contribution ISITE": to_pct(row["pct_isite"]),
+        "% Top 10%": to_pct(row["pct_top10"]),
+        "% Top 1%": to_pct(row["pct_top1"]),
+        "% Int'l": to_pct(row["pct_international"]),
+        "% Company": to_pct(row["pct_company"]),
+        "% SDG": to_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -248,14 +268,10 @@ st.dataframe(
     df_domain_display,
     use_container_width=True,
     hide_index=True,
-    column_config={
-        "Contribution ISITE": st.column_config.ProgressColumn(
-            "Contribution ISITE",
-            min_value=0,
-            max_value=100,
-            format="%.1f%%",
-        ),
-    }
+    column_config={k: PERCENT_COL_CONFIG[k] for k in [
+        "% Total", "Contribution ISITE", "% Top 10%", "% Top 1%",
+        "% Int'l", "% Company", "% SDG", "CAGR",
+    ]},
 )
 
 # FWCI Distribution boxplots - horizontal, separated
@@ -349,12 +365,13 @@ for _, row in df_fields_table.iterrows():
         "": get_domain_emoji(dom_name),
         "Field": row["name"],
         "Pubs": int(row["pubs_total"]),
-        "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,  # Keep as float for progress bar
-        "% Top 10%": format_pct(row["pct_top10"]),
-        "% Top 1%": format_pct(row["pct_top1"]),
-        "% Int'l": format_pct(row["pct_international"]),
-        "% Company": format_pct(row["pct_company"]),
+        "% Total": to_pct(row["pubs_pct_of_ul"]),
+        "Contribution ISITE": to_pct(row["pct_isite"]),
+        "% Top 10%": to_pct(row["pct_top10"]),
+        "% Top 1%": to_pct(row["pct_top1"]),
+        "% Int'l": to_pct(row["pct_international"]),
+        "% Company": to_pct(row["pct_company"]),
+        "% SDG": to_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -364,14 +381,10 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     height=500,
-    column_config={
-        "Contribution ISITE": st.column_config.ProgressColumn(
-            "Contribution ISITE",
-            min_value=0,
-            max_value=100,
-            format="%.1f%%",
-        ),
-    }
+    column_config={k: PERCENT_COL_CONFIG[k] for k in [
+        "% Total", "Contribution ISITE", "% Top 10%", "% Top 1%",
+        "% Int'l", "% Company", "% SDG", "CAGR",
+    ]},
 )
 
 # =============================================================================
@@ -512,12 +525,12 @@ for _, row in df_subfields_filtered.iterrows():
         "Subfield": row["name"],
         "Field": row["field_name"] if pd.notna(row["field_name"]) else "",
         "Pubs": int(row["pubs_total"]),
-        "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
-        "% Top 10%": format_pct(row["pct_top10"]),
-        "% Top 1%": format_pct(row["pct_top1"]),
-        "% Int'l": format_pct(row["pct_international"]),
-        "% SDG": format_pct(row["pct_sdg"]),
+        "% Total": to_pct(row["pubs_pct_of_ul"]),
+        "Contribution ISITE": to_pct(row["pct_isite"]),
+        "% Top 10%": to_pct(row["pct_top10"]),
+        "% Top 1%": to_pct(row["pct_top1"]),
+        "% Int'l": to_pct(row["pct_international"]),
+        "% SDG": to_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -527,14 +540,10 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     height=400,
-    column_config={
-        "Contribution ISITE": st.column_config.ProgressColumn(
-            "Contribution ISITE",
-            min_value=0,
-            max_value=100,
-            format="%.1f%%",
-        ),
-    }
+    column_config={k: PERCENT_COL_CONFIG[k] for k in [
+        "% Total", "Contribution ISITE", "% Top 10%", "% Top 1%",
+        "% Int'l", "% SDG", "CAGR",
+    ]},
 )
 st.caption(f"Showing {len(subfield_table)} subfields")
 
@@ -587,11 +596,11 @@ for _, row in df_topics_filtered.iterrows():
         "Topic": row["name"],
         "Subfield": row["subfield_name"] if pd.notna(row["subfield_name"]) else "",
         "Pubs": int(row["pubs_total"]),
-        "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
-        "% Top 10%": format_pct(row["pct_top10"]),
-        "% Int'l": format_pct(row["pct_international"]),
-        "% SDG": format_pct(row["pct_sdg"]),
+        "% Total": to_pct(row["pubs_pct_of_ul"]),
+        "Contribution ISITE": to_pct(row["pct_isite"]),
+        "% Top 10%": to_pct(row["pct_top10"]),
+        "% Int'l": to_pct(row["pct_international"]),
+        "% SDG": to_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -601,14 +610,10 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     height=400,
-    column_config={
-        "Contribution ISITE": st.column_config.ProgressColumn(
-            "Contribution ISITE",
-            min_value=0,
-            max_value=100,
-            format="%.1f%%",
-        ),
-    }
+    column_config={k: PERCENT_COL_CONFIG[k] for k in [
+        "% Total", "Contribution ISITE", "% Top 10%",
+        "% Int'l", "% SDG", "CAGR",
+    ]},
 )
 st.caption(f"Showing top {len(topic_table)} topics by volume")
 
@@ -640,12 +645,13 @@ for _, row in df_research.iterrows():
         "ID": row["rt_id"],
         "Topic": row["name"],
         "Pubs": int(row["pubs_total"]),
-        "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
-        "% Top 10%": format_pct(row["pct_top10"]),
-        "% Top 1%": format_pct(row["pct_top1"]),
-        "% Int'l": format_pct(row["pct_international"]),
-        "% Company": format_pct(row["pct_company"]),
+        "% Total": to_pct(row["pubs_pct_of_ul"]),
+        "Contribution ISITE": to_pct(row["pct_isite"]),
+        "% Top 10%": to_pct(row["pct_top10"]),
+        "% Top 1%": to_pct(row["pct_top1"]),
+        "% Int'l": to_pct(row["pct_international"]),
+        "% Company": to_pct(row["pct_company"]),
+        "% SDG": to_pct(row["pct_sdg"]),
         "CAGR": format_cagr(row["cagr_2019_2023"]),
     })
 
@@ -655,14 +661,10 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     height=400,
-    column_config={
-        "Contribution ISITE": st.column_config.ProgressColumn(
-            "Contribution ISITE",
-            min_value=0,
-            max_value=100,
-            format="%.1f%%",
-        ),
-    }
+    column_config={k: PERCENT_COL_CONFIG[k] for k in [
+        "% Total", "Contribution ISITE", "% Top 10%", "% Top 1%",
+        "% Int'l", "% Company", "% SDG", "CAGR",
+    ]},
 )
 
 # Heatmap: Research Topics x Domains
