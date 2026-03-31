@@ -234,7 +234,7 @@ for _, row in df_domains.iterrows():
         "Domain": f"{get_domain_emoji(dom_name)} {dom_name}",
         "Pubs": int(row["pubs_total"]),
         "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "% ISITE": row["pct_isite"],  # Keep as float for progress bar
+        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,  # Keep as float for progress bar
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Top 1%": format_pct(row["pct_top1"]),
         "% Int'l": format_pct(row["pct_international"]),
@@ -249,10 +249,10 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
-        "% ISITE": st.column_config.ProgressColumn(
-            "% ISITE",
+        "Contribution ISITE": st.column_config.ProgressColumn(
+            "Contribution ISITE",
             min_value=0,
-            max_value=1,
+            max_value=100,
             format="%.1f%%",
         ),
     }
@@ -350,7 +350,7 @@ for _, row in df_fields_table.iterrows():
         "Field": row["name"],
         "Pubs": int(row["pubs_total"]),
         "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "% ISITE": row["pct_isite"],  # Keep as float for progress bar
+        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,  # Keep as float for progress bar
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Top 1%": format_pct(row["pct_top1"]),
         "% Int'l": format_pct(row["pct_international"]),
@@ -365,10 +365,10 @@ st.dataframe(
     hide_index=True,
     height=500,
     column_config={
-        "% ISITE": st.column_config.ProgressColumn(
-            "% ISITE",
+        "Contribution ISITE": st.column_config.ProgressColumn(
+            "Contribution ISITE",
             min_value=0,
-            max_value=1,
+            max_value=100,
             format="%.1f%%",
         ),
     }
@@ -513,7 +513,7 @@ for _, row in df_subfields_filtered.iterrows():
         "Field": row["field_name"] if pd.notna(row["field_name"]) else "",
         "Pubs": int(row["pubs_total"]),
         "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "% ISITE": row["pct_isite"],
+        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Top 1%": format_pct(row["pct_top1"]),
         "% Int'l": format_pct(row["pct_international"]),
@@ -528,10 +528,10 @@ st.dataframe(
     hide_index=True,
     height=400,
     column_config={
-        "% ISITE": st.column_config.ProgressColumn(
-            "% ISITE",
+        "Contribution ISITE": st.column_config.ProgressColumn(
+            "Contribution ISITE",
             min_value=0,
-            max_value=1,
+            max_value=100,
             format="%.1f%%",
         ),
     }
@@ -588,7 +588,7 @@ for _, row in df_topics_filtered.iterrows():
         "Subfield": row["subfield_name"] if pd.notna(row["subfield_name"]) else "",
         "Pubs": int(row["pubs_total"]),
         "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "% ISITE": row["pct_isite"],
+        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Int'l": format_pct(row["pct_international"]),
         "% SDG": format_pct(row["pct_sdg"]),
@@ -602,10 +602,10 @@ st.dataframe(
     hide_index=True,
     height=400,
     column_config={
-        "% ISITE": st.column_config.ProgressColumn(
-            "% ISITE",
+        "Contribution ISITE": st.column_config.ProgressColumn(
+            "Contribution ISITE",
             min_value=0,
-            max_value=1,
+            max_value=100,
             format="%.1f%%",
         ),
     }
@@ -641,7 +641,7 @@ for _, row in df_research.iterrows():
         "Topic": row["name"],
         "Pubs": int(row["pubs_total"]),
         "% Total": format_pct(row["pubs_pct_of_ul"]),
-        "% ISITE": row["pct_isite"],
+        "Contribution ISITE": round(row["pct_isite"] * 100, 1) if pd.notna(row["pct_isite"]) else None,
         "% Top 10%": format_pct(row["pct_top10"]),
         "% Top 1%": format_pct(row["pct_top1"]),
         "% Int'l": format_pct(row["pct_international"]),
@@ -656,10 +656,10 @@ st.dataframe(
     hide_index=True,
     height=400,
     column_config={
-        "% ISITE": st.column_config.ProgressColumn(
-            "% ISITE",
+        "Contribution ISITE": st.column_config.ProgressColumn(
+            "Contribution ISITE",
             min_value=0,
-            max_value=1,
+            max_value=100,
             format="%.1f%%",
         ),
     }
